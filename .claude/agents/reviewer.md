@@ -21,7 +21,7 @@ surrounding code to judge the change in context. Read `CLAUDE.md` for the projec
 
 **Code:** is the diff correct and simple?
 - Correctness: empty input, `None`, boundary values, error paths that swallow failures or default
-  to "benign" (the design says fail cautious and fail visible), missing `await`, shared mutable
+  to "GOOD" (the design says fail cautious and fail visible), missing `await`, shared mutable
   state across concurrent requests.
 - Security: domain names are attacker-controlled. Check they never reach the prompt as
   instructions, a shell or the filesystem unescaped. No secrets in code or logs.

@@ -5,7 +5,7 @@ Guidance for Claude Code working in this repository.
 ## The project
 
 `dnstriage` is a small HTTP service that classifies DNS domains (cache → blocklist → allowlist →
-enrichment → LLM) and rolls verdicts up into a per-client risk level. It is a **proof of concept**
+enrichment → LLM) and reports which domains each client queried. It is a **proof of concept**
 and a portfolio piece.
 
 The design lives in `DESIGN.md`. Keep it true: if a change alters a decision recorded there, update it in the same PR.
@@ -20,8 +20,8 @@ The design lives in `DESIGN.md`. Keep it true: if a change alters a decision rec
 - **In-memory state only.** No database, no migrations. The README notes that a real deployment would need SQLite/Postgres adaptors.
 - **Runs on Windows and Linux, locally and in Docker.** No bash-only steps in the run or test path.
   Use `pathlib`, not hard-coded separators.
-- **No model yet.** Build against the degraded path (no model endpoint). A live model is added once
-  everything else works.
+- **No real model yet.** Build and test against the fake model (`tests/fake_model.py`), which the
+  defaults point at, so nothing needs configuring. A real model is added once everything else works.
 - **Dependencies:** plain `pip` with exact pins in `requirements.txt`. Python 3.12. Ask before adding
   any new dependency.
 

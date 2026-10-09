@@ -35,7 +35,6 @@ that changed. Delete the section if there's nothing.>
 
 Rules:
 
-- Use the project's own terms from `DESIGN.md` (registrable domain, tier, verdict, degraded,
-  roll-up).
+- Use the project's own terms from `DESIGN.md` (registrable domain, tier, verdict, degraded).
 - Evidence is real command output, never written by hand.
 - No marketing tone, no "simply", no lists of files — the diff already shows the files.
