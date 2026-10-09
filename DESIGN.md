@@ -36,7 +36,7 @@ compromised and not a blocking decision. There are legitimate reasons to query a
 | C5 | No telemetry leaves the operator's network except to the configured model | DNS logs are sensitive; the README recommends a self-hosted model. |
 | C6 | The model never takes instructions from data | Domain names are attacker-controlled: delimited data, schema-constrained output, no tools. |
 | C7 | Failures are never silent | Degraded mode, readiness reporting, per-tier metrics. |
-| C8 | Easy to run | `docker compose up` plus `python tests/smoke.py`. Works on Windows and Linux, locally or in Docker. |
+| C8 | Easy to run, with no configuration | `docker compose up` plus `python tests/smoke.py`, with no env vars and no real model (a fake model ships in the repo). Works on Windows and Linux, locally or in Docker. |
 | C9 | Simple over complete | It's a proof of concept. Readability beats features. |
 
 ## 3. Architecture
@@ -94,8 +94,14 @@ confidence is the model's probability for its chosen verdict, normalised across 
 Otherwise it falls back to the stated confidence. The response records which
 (`confidence_source: logprobs | stated`).
 
-**Degraded mode.** If the model is unreachable, times out or errors (or no model is configured), the
-verdict is `UNKNOWN` with source `degraded`. It is not cached, `/ready` reports `degraded`, `/health`
+**Fake model** (`tests/fake_model.py`, test tooling, not budgeted). A stdlib-only HTTP server that
+implements just `POST /v1/chat/completions` and answers every request with a random `GOOD`, `WARN`
+or `BAD` in the verdict schema. The service's defaults point at it, so the whole pipeline (client,
+schema, validation, metrics) runs with no env vars and no GPU. A real model is two env vars away
+(`OPENAI_BASE_URL`, `MODEL_NAME`). Its verdicts are meaningless, so tests check only that the LLM
+tier answered, not what it said.
+
+**Degraded mode.** If the model is unreachable, times out or errors, the verdict is `UNKNOWN` with source `degraded`. It is not cached, `/ready` reports `degraded`, `/health`
 stays OK, and a metric is incremented. The list tiers keep working.
 
 ## 4. API
@@ -138,7 +144,7 @@ The README will show a sample run, e.g. "10,000 queries â†’ 400 unique domains â
 | D5 | Key on registrable domain | Key on full name | Tunnelling can't explode model calls; the model judges the pattern. |
 | D6 | Fail cautious on bad output, visible on outage | Default to GOOD | A broken indicator that says "GOOD" is worse than none. |
 | D7 | In-memory state | A database | Line budget and simplicity. State is lost on restart. A real deployment would add SQLite/Postgres adaptors. No migrations. |
-| D8 | No model during development | Build against a live model | Everything is built and tested on the degraded path first; a live model is added last. |
+| D8 | Fake model by default | Require a live model to run | Anyone can run and test it with no env vars or GPU; a real model is added last and swapped in by config. |
 | D9 | Report per-client domains, no risk level | A per-client compromise score | Querying a BAD domain can be legitimate; the analyst judges the host. Fewer thresholds, fewer lines. |
 
 ## 7. Threat model
@@ -157,9 +163,9 @@ The README will show a sample run, e.g. "10,000 queries â†’ 400 unique domains â
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `OPENAI_BASE_URL` | `http://localhost:8000/v1` | Model endpoint. |
+| `OPENAI_BASE_URL` | `http://localhost:8001/v1` | Model endpoint. Defaults to the fake model. |
 | `OPENAI_API_KEY` | `not-needed` | Key, if required. |
-| `MODEL_NAME` | none | Model to use. If unset, unknown domains are `degraded`. |
+| `MODEL_NAME` | `random` | Model to use. The fake model ignores it. |
 | `ALLOWLIST_PATH` | `data/allowlist.txt` | One domain per line. |
 | `BLOCKLIST_PATH` | `data/blocklist.txt` | One domain per line, or hosts-file format. |
 | `LLM_TIMEOUT_S` | `20` | Per-call timeout. |
@@ -172,8 +178,9 @@ The README will show a sample run, e.g. "10,000 queries â†’ 400 unique domains â
 app/main.py            # the service â€” all budgeted Python
 data/                  # small sample allowlist, blocklist and sample_batch.json
 tests/smoke.py         # stdlib-only API checks (not budgeted)
+tests/fake_model.py    # stdlib-only fake OpenAI endpoint, random verdicts (not budgeted)
 Dockerfile             # python:3.12-slim, non-root
-compose.yaml           # api service (a model service is added later)
+compose.yaml           # api + fake model (a real model service is added later)
 .github/workflows/     # CI
 requirements.txt       # exact pins
 README.md, DESIGN.md, CLAUDE.md, .claude/
@@ -181,10 +188,13 @@ README.md, DESIGN.md, CLAUDE.md, .claude/
 
 ## 10. CI (GitHub Actions)
 
-Runs without a model: `ruff check`, fail if `app/` exceeds 200 lines, build the image, then start
-it with no model and run `tests/smoke.py`. That checks `/health`, that list tiers return verdicts,
-that unknown domains come back `degraded`, and that `/ready` says so. CI deliberately exercises the
-failure path.
+Runs without a real model: `ruff check`, fail if `app/` exceeds 200 lines, build the image, then
+run `tests/smoke.py` twice:
+
+1. **With the fake model.** `/health` is OK, list tiers return their verdicts, and unknown domains
+   get a verdict from source `llm`.
+2. **With the model endpoint unreachable.** Unknown domains come back `degraded` and `/ready` says
+   so. CI deliberately exercises the failure path.
 
 ## 11. Out of scope / future work
 
