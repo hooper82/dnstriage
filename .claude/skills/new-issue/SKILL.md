@@ -57,7 +57,7 @@ Body template:
 <the behaviour, from the API user's point of view — one or two sentences>
 
 ## Acceptance criteria
-- [ ] <observable through the API, e.g. "POST /ingest with a blocklisted domain returns verdict malicious, source blocklist">
+- [ ] <observable through the API, e.g. "POST /ingest with a blocklisted domain returns verdict BAD, source blocklist">
 - [ ] `tests/smoke.py` covers it
 - [ ] Python in `app/` still under 200 lines
 

@@ -5,7 +5,7 @@ Guidance for Claude Code working in this repository.
 ## The project
 
 `dnstriage` is a small HTTP service that classifies DNS domains (cache → blocklist → allowlist →
-enrichment → LLM) and rolls verdicts up into a per-client risk level. It is a **proof of concept**
+enrichment → LLM) and reports which domains each client queried. It is a **proof of concept**
 and a portfolio piece.
 
 The design lives in `DESIGN.md`. Keep it true: if a change alters a decision recorded there, update it in the same PR.
