@@ -62,10 +62,11 @@ behind an allowlisted parent.
 **Cache key: registrable domain.** A DNS tunnel produces thousands of unique subdomains under one
 domain. Keying on the registrable domain means one model call, and the model sees the *pattern*
 (subdomain count and sample labels) rather than one name. The one exception: a name that is itself
-on the blocklist is its own key (see Lists). Only valid **model** verdicts are cached: list hits
-are already instant and checked first, and `llm_invalid` and `degraded` results are never cached.
-Entries expire after `CACHE_TTL_S`; expired ones stay in memory until overwritten. While the model
-is down, domains it already classified keep being served from the cache.
+on the blocklist is its own key (see Lists). Only **model** results are cached; list hits are
+already instant and checked first. Valid verdicts expire after `CACHE_TTL_S`; `degraded` results
+after a fixed 10 minutes (see Degraded mode); `llm_invalid` is never cached. Expired entries stay in
+memory until overwritten. While the model is down, domains it already classified keep being served
+from the cache.
 
 **Lists.** Both load at startup from paths in env vars.
 
@@ -102,7 +103,8 @@ and its NXDOMAIN ratio. The model is never given tools to fetch evidence itself 
 - Timeouts and errors trigger degraded mode for that domain, and **the rest of that batch skips the
   model** *(user decision)*: a model outage costs one wave of failed calls per batch (at most
   `LLM_MAX_CONCURRENCY`), not one per unknown domain. Per batch, not global: a global flag would stop
-  every call, so `/ready` could never see a success and recover. The next batch tries again.
+  every call, so `/ready` could never see a success and recover. Skipped domains are cached as
+  `UNKNOWN` like failed ones (see below), so repeat traffic leaves the model alone for 10 minutes.
 
 ```json
 { "verdict": "GOOD | WARN | BAD", "confidence": 0.0, "reason": "≤ 200 chars" }
@@ -121,12 +123,17 @@ schema, validation, metrics) runs with no env vars and no GPU. A real model is t
 tier answered, not what it said. One test trigger: a request mentioning `smoke-invalid-output` gets
 a reply that breaks the schema, so the fail-cautious path is tested too.
 
-**Degraded mode.** If the model is unreachable, times out or errors, the verdict is `UNKNOWN` with source `degraded`. It is not cached, `/ready` reports `degraded`, `/health`
+**Degraded mode.** If the model is unreachable, times out or errors, the verdict is `UNKNOWN` with source `degraded`. It is cached for 10 minutes, `/ready` reports `degraded`, `/health`
 stays OK, and a metric is incremented. The list tiers keep working.
 
 - **No SDK retries** (`max_retries=0`), so `LLM_TIMEOUT_S` means what it says (the default 2 retries
   could triple it). Trade-off: a transient 429/503 from a real backend degrades that domain at once,
-  which is acceptable because degraded results aren't cached and the next ingest tries again.
+  and, through the batch skip and the degraded cache, the rest of that batch, for 10 minutes.
+- **The degraded cache is an outage timeout** *(user decision)*. Every unknown domain in a batch
+  that found the model down, called or skipped, is cached as `UNKNOWN` for a fixed 10 minutes
+  (`DEGRADED_TTL`, not configurable). Repeat traffic doesn't touch a down model during that window;
+  after it, traffic tries the model again. Cost: after the model recovers, those domains stay
+  `UNKNOWN` (reported as source `cache`) for up to 10 minutes.
 - **`/ready` reports the outcome of the most recent model call**, and always returns 200. It is a
   status report, not a gate: a 503 readiness probe would pull the service out of rotation, no
   traffic would reach the model, and it could never recover. Before the first call it says `ok`.
@@ -176,7 +183,7 @@ The README will show a sample run, e.g. "10,000 queries → 400 unique domains �
 | D3 | Enrichment in code | Agentic tool calling | Tools widen the prompt-injection surface; backend support varies. |
 | D4 | Lists, then cache, before the model | Everything to the model | The model only sees genuinely unknown domains. |
 | D5 | Key on registrable domain (or the full name when it is itself blocklisted) | Key on full name | Tunnelling can't explode model calls; the model judges the pattern; one listed host can't condemn its parent domain. |
-| D6 | Fail cautious on bad output, visible on outage | Default to GOOD | A broken indicator that says "GOOD" is worse than none. |
+| D6 | Fail cautious on bad output, visible on outage | Default to GOOD | A broken indicator that says "GOOD" is worse than none. An outage answers `UNKNOWN`, cached briefly (10 min) so a down model is left alone. |
 | D7 | In-memory state | A database | Line budget and simplicity. State is lost on restart. A real deployment would add SQLite/Postgres adaptors. No migrations. |
 | D8 | Fake model by default | Require a live model to run | Anyone can run and test it with no env vars or GPU; a real model is added last and swapped in by config. |
 | D9 | Report per-client domains, no risk level | A per-client compromise score | Querying a BAD domain can be legitimate; the analyst judges the host. Fewer thresholds, fewer lines. |
@@ -271,8 +278,8 @@ then run `tests/smoke.py` twice:
 
 1. **With the fake model.** `/health` is OK, list tiers return their verdicts, and unknown domains
    get a verdict from source `llm`.
-2. **With the model endpoint unreachable.** New unknown domains come back `degraded` (and are not
-   cached), domains cached by the normal run are still served, and `/ready` says so. CI deliberately exercises the failure path: it stops the fake model and reruns
+2. **With the model endpoint unreachable.** New unknown domains come back `degraded` and are then
+   served as cached `UNKNOWN`, domains cached by the normal run are still served, and `/ready` says so. CI deliberately exercises the failure path: it stops the fake model and reruns
    `tests/smoke.py --model-down` against the same service.
 
 The 200-line budget is checked by hand on each PR (the `/work` checks and the reviewer agent), not

@@ -60,16 +60,16 @@ check("GET /health returns 200 and status ok", status == 200 and body == {"statu
 
 # Fresh names each run, so reruns against the same service aren't served from the cache.
 run = time.time_ns()
-fresh, fresh_gh = f"smoke{run}.com", f"someone{run}.github.io"
+fresh, fresh_gh, invalid = f"smoke{run}.com", f"someone{run}.github.io", f"smoke-invalid-output-{run}.com"
 names = ["a.example.com", "B.Example.COM.", "bad.example.com", "x.evil.github.io", fresh_gh, fresh, "localhost",
-         "smoke-invalid-output.com"]
+         invalid]
 status, body = post("/ingest", [record(d) for d in names])
 entries = {d["domain"]: d for d in body.get("domains", [])}
 verdicts = {d: (e["verdict"], e["source"]) for d, e in entries.items()}
 check("POST /ingest returns 200", status == 200)
 check("ingest groups names by registrable domain, blocklisted hosts separately",
       list(verdicts) == ["example.com", "bad.example.com", "evil.github.io", fresh_gh, fresh, "localhost",
-                         "smoke-invalid-output.com"])
+                         invalid])
 check("allowlisted domain is GOOD (example.com)", verdicts.get("example.com") == ("GOOD", "allowlist"))
 check("blocklisted host under an allowlisted domain is BAD (bad.example.com)",
       verdicts.get("bad.example.com") == ("BAD", "blocklist"))
@@ -80,13 +80,18 @@ check("GET /domains normalises the name and answers from the lists (www.example.
 check("GET /domains for a never-seen domain is 404", get(f"/domains/never{run}.com")[0] == 404)
 if MODEL_DOWN:
     check("with the model down, new unlisted domains are UNKNOWN/degraded",
-          all(verdicts.get(d) == ("UNKNOWN", "degraded") for d in [fresh_gh, fresh, "smoke-invalid-output.com"]))
-    check("degraded results aren't cached (GET /domains is 404)", get(f"/domains/{fresh}")[0] == 404)
+          all(verdicts.get(d) == ("UNKNOWN", "degraded") for d in [fresh_gh, fresh, invalid]))
+    check("a degraded result is cached for a while (GET /domains returns it)",
+          get(f"/domains/{fresh}") == (200, {"domain": fresh, "verdict": "UNKNOWN", "source": "degraded"}))
+    check("a repeat domain gets the cached UNKNOWN without calling the model",
+          post("/ingest", [record(fresh)])[1].get("domains") == [{"domain": fresh, "verdict": "UNKNOWN", "source": "cache"}])
     check("a verdict cached by the earlier normal run is still served (localhost)",
           verdicts.get("localhost", ("", ""))[1] == "cache")
     status, body = post("/ingest", [record(f"down{i}-{run}.com") for i in range(10)])
     check("with the model down, a batch stops calling it after the first wave (1-4 calls for 10 domains)",
           1 <= body.get("model_calls", 0) <= 4 and all(d["source"] == "degraded" for d in body["domains"]))
+    check("every domain in that batch is cached as UNKNOWN, skipped ones included",
+          all(get(f"/domains/down{i}-{run}.com")[0] == 200 for i in range(10)))
     check("GET /ready reports degraded", get("/ready") == (200, {"status": "degraded"}))
     check("GET /health stays ok while degraded", get("/health") == (200, {"status": "ok"}))
 else:
@@ -98,13 +103,13 @@ else:
     check("model verdict has a confidence 0-1 and a reason of at most 200 characters",
           0 <= model.get("confidence", -1) <= 1 and 0 < len(model.get("reason", "")) <= 200)
     check("model output that breaks the schema fails cautious (WARN/llm_invalid)",
-          verdicts.get("smoke-invalid-output.com") == ("WARN", "llm_invalid"))
+          verdicts.get(invalid) == ("WARN", "llm_invalid"))
     check("localhost is classified by the model, or served from an earlier run's cache",
           verdicts.get("localhost", ("", ""))[1] in ("llm", "cache"))
-    again = {d["domain"]: d for d in post("/ingest", [record(fresh), record("smoke-invalid-output.com")])[1]["domains"]}
+    again = {d["domain"]: d for d in post("/ingest", [record(fresh), record(invalid)])[1]["domains"]}
     check("a repeat domain is served from the cache, with the same verdict",
           again[fresh]["source"] == "cache" and again[fresh]["verdict"] == model.get("verdict"))
-    check("invalid model output isn't cached", again["smoke-invalid-output.com"]["source"] == "llm_invalid")
+    check("invalid model output isn't cached", again[invalid]["source"] == "llm_invalid")
     check("GET /domains returns the cached model verdict with its original source",
           get(f"/domains/{fresh}") == (200, model))
     # Two clients send the same 8 new domains at once; the fake model takes 1 s per smoke-slow call.
