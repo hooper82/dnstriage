@@ -1,7 +1,7 @@
 # dnstriage: Design
 
-A small inference service that classifies DNS domains with curated lists and an LLM, and reports
-which domains each client has queried.
+A small inference service that classifies DNS domains with curated lists and an LLM, and reports a
+verdict and the evidence behind it for each domain.
 
 ## 1. Purpose
 
@@ -17,13 +17,14 @@ and security.
 **Problem.** DNS logs are a cheap, high-signal way to spot infected hosts. Malware shows up as
 bursts of random-looking domains (DGA), many high-entropy subdomains under one domain (tunnelling),
 or repeated lookups of a rare domain (beaconing). One query rarely proves anything; a pattern from
-one host often does. So the service **classifies domains** and shows **what each client queried**,
-leaving the judgement about a host to the analyst.
+one host often does. So the service **classifies domains** and shows **the evidence behind each
+verdict**, leaving the judgement about a host to the analyst.
 
 **Goal.** An HTTP API that ingests DNS query records, classifies each new domain as **GOOD**,
-**WARN** or **BAD** (curated lists first, an LLM only for unknowns), and reports each client's
-domains with their verdicts. The output is evidence for an analyst, not a judgement that a host is
+**WARN** or **BAD** (curated lists first, an LLM only for unknowns), and returns each domain's
+verdict and evidence. The output is evidence for an analyst, not a judgement that a host is
 compromised and not a blocking decision. There are legitimate reasons to query a BAD domain.
+Per-client views were planned and cut for the line budget (§11).
 
 ## 2. Constraints
 
@@ -119,10 +120,8 @@ and `/domains`. The model is never given tools to fetch evidence itself (D3).
 { "verdict": "GOOD | WARN | BAD", "confidence": 0.0, "reason": "≤ 200 chars" }
 ```
 
-**Confidence from logprobs** *(first to cut if over budget)*. Where the backend returns logprobs,
-confidence is the model's probability for its chosen verdict, normalised across the three classes.
-Otherwise it falls back to the stated confidence. The response records which
-(`confidence_source: logprobs | stated`).
+**Confidence** is the model's own stated confidence, validated to 0–1. Confidence from logprobs was
+planned and cut for the line budget (§11).
 
 **Fake model** (`tests/fake_model.py`, test tooling, not budgeted). A stdlib-only HTTP server that
 implements just `POST /v1/chat/completions` and answers every request with a random `GOOD`, `WARN`
@@ -156,8 +155,6 @@ stays OK, and a metric is incremented. The list tiers keep working.
 |---|---|---|
 | `POST` | `/ingest` | Classify a batch of records; returns per-domain verdicts and a count of model calls. |
 | `GET` | `/domains/{domain}` | A domain's verdict: from the lists, else the cached model verdict with its evidence, else 404. The name is normalised. |
-| `GET` | `/clients` | All clients, each with a count of domains per verdict. |
-| `GET` | `/clients/{ip}` | One client's domains and their verdicts. |
 | `GET` | `/health` | Liveness. |
 | `GET` | `/ready` | Readiness, including model status (`ok` / `degraded`). |
 | `GET` | `/metrics` | Prometheus metrics. |
@@ -195,7 +192,7 @@ The README will show a sample run, e.g. "10,000 queries → 400 unique domains �
 | D6 | Fail cautious on bad output, visible on outage | Default to GOOD | A broken indicator that says "GOOD" is worse than none. An outage answers `UNKNOWN`, cached briefly (10 min) so a down model is left alone. |
 | D7 | In-memory state | A database | Line budget and simplicity. State is lost on restart. A real deployment would add SQLite/Postgres adaptors. No migrations. |
 | D8 | Fake model by default | Require a live model to run | Anyone can run and test it with no env vars or GPU; a real model is added last and swapped in by config. |
-| D9 | Report per-client domains, no risk level | A per-client compromise score | Querying a BAD domain can be legitimate; the analyst judges the host. Fewer thresholds, fewer lines. |
+| D9 | No per-client risk level | A per-client compromise score | Querying a BAD domain can be legitimate; the analyst judges the host. Fewer thresholds, fewer lines. (Per-client views were later cut too; §11.) |
 | D10 | Active DNS and RDAP lookups for unknown domains *(user decision)* | Passive evidence from ingested records (subdomain count, NXDOMAIN ratio) | Simple, and gives the model real-world facts (records, domain age). Cost: unknown domains leave the network (C5), and resolving one queries the attacker's own nameservers. |
 
 ## 7. Threat model
@@ -300,6 +297,10 @@ by CI.
 ## 11. Out of scope / future work
 
 - Persistent state: SQLite/Postgres adaptors for verdicts and client history.
+- **Cut for the 200-line budget** *(user decisions)*: per-client views (`GET /clients`,
+  `GET /clients/{ip}`: which domains each client queried, #13), and confidence from logprobs (the
+  model's probability for its chosen verdict where the backend returns logprobs, #15). Metrics (#14)
+  were kept over client views as the stronger operational signal.
 - Live reputation lookups: query a domain reputation API for domains the local lists don't cover,
   with the lists kept as local overrides. Left out because every suitable API needs a key or
   sign-up, which would break running with no configuration (C8).
