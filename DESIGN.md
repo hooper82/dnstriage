@@ -95,8 +95,14 @@ and its NXDOMAIN ratio. The model is never given tools to fetch evidence itself 
   validator, because not every backend enforces the schema. A `reason` over 200 characters fails
   validation like any other broken output; it is not truncated.
 - Invalid output fails cautious: `WARN`, source `llm_invalid`.
-- An `asyncio.Semaphore` caps concurrent calls; in-flight requests for the same domain are shared.
-- Timeouts and errors trigger degraded mode for that domain.
+- A batch's unknown domains are classified concurrently; an `asyncio.Semaphore` caps model calls in
+  flight (`LLM_MAX_CONCURRENCY`). Concurrent requests for the same domain share one call: the second
+  waits on the first's task (behind `asyncio.shield`, so one cancelled request can't cancel a call
+  others are waiting on). A shared call runs under the batch that started it.
+- Timeouts and errors trigger degraded mode for that domain, and **the rest of that batch skips the
+  model** *(user decision)*: a model outage costs one wave of failed calls per batch (at most
+  `LLM_MAX_CONCURRENCY`), not one per unknown domain. Per batch, not global: a global flag would stop
+  every call, so `/ready` could never see a success and recover. The next batch tries again.
 
 ```json
 { "verdict": "GOOD | WARN | BAD", "confidence": 0.0, "reason": "≤ 200 chars" }
@@ -157,8 +163,9 @@ Ingestion is synchronous: `/ingest` returns once the batch is classified.
 | `dnstriage_llm_requests_total` | Counter | `outcome` = ok, invalid, timeout, error |
 | `dnstriage_degraded_total` | Counter | — |
 
-A `cache` decision always means a model call was avoided. The README will show a sample run, e.g.
-"10,000 queries → 400 unique domains → 12 model calls".
+A `cache` decision always means a model call was avoided. A request that joins another's in-flight
+call also reports `llm` without making a call, so `llm` decisions can outnumber model requests.
+The README will show a sample run, e.g. "10,000 queries → 400 unique domains → 12 model calls".
 
 ## 6. Key decisions
 
