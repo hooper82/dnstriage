@@ -181,7 +181,8 @@ degraded-call metrics were cut (§11). Counters are per process. `/metrics` redi
 
 A `cache` decision always means a model call was avoided. A request that joins another's in-flight
 call also reports `llm` without making a call, so `llm` decisions can outnumber model requests.
-The README will show a sample run, e.g. "10,000 queries → 400 unique domains → 12 model calls".
+The README's sample run: 50 queries → 19 unique domains → 5 answered by the lists → 14 model calls,
+and 0 model calls when the same batch is posted again.
 
 ## 6. Key decisions
 

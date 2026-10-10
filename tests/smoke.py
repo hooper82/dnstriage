@@ -7,6 +7,7 @@ Run it after a normal run against the same service: it expects that run's cached
 The concurrency checks assume the default LLM_MAX_CONCURRENCY of 4.
 """
 import json
+import pathlib
 import sys
 import threading
 import time
@@ -89,6 +90,10 @@ check("GET /domains for a never-seen domain is 404", get(f"/domains/never{run}.c
 before = decisions("allowlist")
 post("/ingest", [record("example.com")])
 check("GET /metrics counts decisions by source (one more allowlist decision)", decisions("allowlist") == before + 1)
+sample = json.loads((pathlib.Path(__file__).parent.parent / "data" / "sample_batch.json").read_text())
+status, body = post("/ingest", sample)
+check("the sample batch is accepted and groups 50 records into 19 keys",
+      status == 200 and len(sample) == 50 and len(body.get("domains", [])) == 19)
 if MODEL_DOWN:
     check("with the model down, new unlisted domains are UNKNOWN/degraded",
           all(verdicts.get(d) == ("UNKNOWN", "degraded") for d in [fresh_gh, fresh, invalid]))
