@@ -14,6 +14,7 @@ Needs Python 3.12+ (or just Docker). The service listens on http://localhost:808
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
+python3 tests/fake_model.py &       # stand-in model on port 8001 (or run it in a second terminal)
 .venv/bin/python -m uvicorn app.main:app --port 8080
 ```
 
@@ -22,14 +23,18 @@ python3 -m venv .venv
 ```powershell
 py -3.12 -m venv .venv
 .venv\Scripts\pip install -r requirements.txt
+Start-Process py tests/fake_model.py   # stand-in model on port 8001, in its own window
 .venv\Scripts\python -m uvicorn app.main:app --port 8080
 ```
 
 **Docker**
 
 ```bash
-docker compose up --build
+docker compose up --build    # starts the service and the fake model
 ```
+
+Unknown domains are classified by a model. Until you point it at a real one, a **fake model**
+(`tests/fake_model.py`) answers with random verdicts, so everything runs with no configuration.
 
 **Check it works.** In a second terminal, run the smoke test (standard library only, so any Python 3 will do):
 
@@ -60,6 +65,9 @@ All settings are optional environment variables; the defaults run the demo as-is
 |---|---|---|
 | `BLOCKLIST_PATH` | `data/blocklist.txt` | Known-bad domains (`BAD`). One per line or hosts-file format, e.g. the abuse.ch URLhaus hostfile. |
 | `ALLOWLIST_PATH` | `data/allowlist.txt` | Known-good registrable domains (`GOOD`), e.g. the Tranco top 100k. |
+| `OPENAI_BASE_URL` | `http://localhost:8001/v1` | OpenAI-compatible model endpoint. The default is the fake model. |
+| `OPENAI_API_KEY` | `not-needed` | Key for the endpoint, if it needs one. |
+| `MODEL_NAME` | `random` | Model to use (the fake model ignores it). |
 
 The bundled lists are tiny samples with fake or reserved names. Lists are read at startup.
 

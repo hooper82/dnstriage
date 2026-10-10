@@ -48,19 +48,29 @@ else:
 
 check("GET /health returns 200 and status ok", status == 200 and body == {"status": "ok"})
 
-names = ["a.example.com", "B.Example.COM.", "bad.example.com", "x.evil.github.io", "someone.github.io", "localhost"]
+names = ["a.example.com", "B.Example.COM.", "bad.example.com", "x.evil.github.io", "someone.github.io", "localhost",
+         "smoke-invalid-output.com"]
 status, body = post("/ingest", [record(d) for d in names])
-verdicts = {d["domain"]: (d["verdict"], d["source"]) for d in body.get("domains", [])}
+entries = {d["domain"]: d for d in body.get("domains", [])}
+verdicts = {d: (e["verdict"], e["source"]) for d, e in entries.items()}
 check("POST /ingest returns 200", status == 200)
 check("ingest groups names by registrable domain, blocklisted hosts separately",
-      list(verdicts) == ["example.com", "bad.example.com", "evil.github.io", "someone.github.io", "localhost"])
+      list(verdicts) == ["example.com", "bad.example.com", "evil.github.io", "someone.github.io", "localhost",
+                         "smoke-invalid-output.com"])
 check("allowlisted domain is GOOD (example.com)", verdicts.get("example.com") == ("GOOD", "allowlist"))
 check("blocklisted host under an allowlisted domain is BAD (bad.example.com)",
       verdicts.get("bad.example.com") == ("BAD", "blocklist"))
 check("blocklisted registrable domain catches its subdomains (x.evil.github.io)",
       verdicts.get("evil.github.io") == ("BAD", "blocklist"))
-check("allowlisting github.io doesn't cover other *.github.io sites", verdicts.get("someone.github.io") == ("UNKNOWN", "degraded"))
-check("unlisted domain is UNKNOWN/degraded (localhost)", verdicts.get("localhost") == ("UNKNOWN", "degraded"))
+check("allowlisting github.io doesn't cover other *.github.io sites (goes to the model)",
+      verdicts.get("someone.github.io", ("", ""))[1] == "llm")
+model = entries.get("localhost", {})
+check("unlisted domain is classified by the model (localhost)",
+      model.get("source") == "llm" and model.get("verdict") in ("GOOD", "WARN", "BAD"))
+check("model verdict has a confidence 0-1 and a reason of at most 200 characters",
+      0 <= model.get("confidence", -1) <= 1 and 0 < len(model.get("reason", "")) <= 200)
+check("model output that breaks the schema fails cautious (WARN/llm_invalid)",
+      verdicts.get("smoke-invalid-output.com") == ("WARN", "llm_invalid"))
 
 bad = record("x.com")
 del bad["domain"]

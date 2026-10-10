@@ -89,8 +89,9 @@ and its NXDOMAIN ratio. The model is never given tools to fetch evidence itself 
 
 **LLM verdict.**
 - `AsyncOpenAI` client; `base_url`, `api_key` and `model` from env vars.
-- One Pydantic model is both the `response_format` JSON schema and the validator, because not every
-  backend enforces the schema.
+- One Pydantic model is both the `response_format` JSON schema (strict, no extra fields) and the
+  validator, because not every backend enforces the schema. A `reason` over 200 characters fails
+  validation like any other broken output; it is not truncated.
 - Invalid output fails cautious: `WARN`, source `llm_invalid`.
 - An `asyncio.Semaphore` caps concurrent calls; in-flight requests for the same domain are shared.
 - Timeouts and errors trigger degraded mode for that domain.
@@ -109,7 +110,8 @@ implements just `POST /v1/chat/completions` and answers every request with a ran
 or `BAD` in the verdict schema. The service's defaults point at it, so the whole pipeline (client,
 schema, validation, metrics) runs with no env vars and no GPU. A real model is two env vars away
 (`OPENAI_BASE_URL`, `MODEL_NAME`). Its verdicts are meaningless, so tests check only that the LLM
-tier answered, not what it said.
+tier answered, not what it said. One test trigger: a request mentioning `smoke-invalid-output` gets
+a reply that breaks the schema, so the fail-cautious path is tested too.
 
 **Degraded mode.** If the model is unreachable, times out or errors, the verdict is `UNKNOWN` with source `degraded`. It is not cached, `/ready` reports `degraded`, `/health`
 stays OK, and a metric is incremented. The list tiers keep working.
