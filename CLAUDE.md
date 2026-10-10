@@ -46,16 +46,18 @@ prefixes, no "wip" or "fix typo" commits — squash those before pushing.
 
 ## Commands
 
-Setup (Linux / macOS):
+Setup and run (Linux / macOS):
 
 ```
-python3 -m venv .venv && . .venv/bin/activate && pip install -r requirements.txt
+python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+.venv/bin/python -m uvicorn app.main:app --port 8080
 ```
 
-Setup (Windows PowerShell):
+Setup and run (Windows PowerShell; no activation needed, so execution policy doesn't matter):
 
 ```
-py -3.12 -m venv .venv; .venv\Scripts\Activate.ps1; pip install -r requirements.txt
+py -3.12 -m venv .venv; .venv\Scripts\pip install -r requirements.txt
+.venv\Scripts\python -m uvicorn app.main:app --port 8080
 ```
 
 Checks, once the files exist: `ruff check .`, the line-budget command above,
