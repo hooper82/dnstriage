@@ -34,12 +34,13 @@ client = AsyncOpenAI(
     base_url=os.environ.get("OPENAI_BASE_URL", "http://localhost:8001/v1"),
     api_key=os.environ.get("OPENAI_API_KEY", "not-needed"),
     timeout=float(os.environ.get("LLM_TIMEOUT_S", "20")),
-    max_retries=0,  # fail fast and visibly; degraded results aren't cached, so the next ingest retries
+    max_retries=0,  # fail fast and visibly; a down model is then left alone for DEGRADED_TTL
 )
 MODEL = os.environ.get("MODEL_NAME", "random")
 STATUS = {"model": "ok"}  # outcome of the most recent model call, reported by /ready
-CACHE: dict[str, tuple[float, dict]] = {}  # key -> (expiry, verdict); valid model verdicts only
+CACHE: dict[str, tuple[float, dict]] = {}  # key -> (expiry, verdict): model verdicts and degraded results
 CACHE_TTL = float(os.environ.get("CACHE_TTL_S", "86400"))
+DEGRADED_TTL = 600  # model down: answer UNKNOWN for 10 minutes before asking it again (user decision)
 SEM = asyncio.Semaphore(int(os.environ.get("LLM_MAX_CONCURRENCY", "4")))  # caps model calls in flight
 INFLIGHT: dict[str, asyncio.Task] = {}  # key -> the model call already running for it
 SYSTEM = (
@@ -115,13 +116,15 @@ async def ask(domain: str, run: dict) -> dict:
     """One capped model call. Once a call in this batch fails, the rest of the batch skips the model."""
     async with SEM:
         if run["down"]:
-            return {"domain": domain, "verdict": "UNKNOWN", "source": "degraded"}
-        run["calls"] += 1
-        result = await classify(domain)
-    if result["source"] == "degraded":
-        run["down"] = True
-    elif result["source"] == "llm":  # never cache llm_invalid or degraded
-        CACHE[domain] = (time.monotonic() + CACHE_TTL, result)
+            result = {"domain": domain, "verdict": "UNKNOWN", "source": "degraded"}
+        else:
+            run["calls"] += 1
+            result = await classify(domain)
+            if result["source"] == "degraded":
+                run["down"] = True  # only ever set: one failure is enough to stop the batch
+    ttl = {"llm": CACHE_TTL, "degraded": DEGRADED_TTL}.get(result["source"])  # llm_invalid: never cached
+    if ttl:
+        CACHE[domain] = (time.monotonic() + ttl, result)
     return result
 
 

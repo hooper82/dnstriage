@@ -43,7 +43,7 @@ python tests/smoke.py
 ```
 
 To see degraded mode, stop the fake model and run `python tests/smoke.py --model-down`: new unknown
-domains come back `UNKNOWN`/`degraded` (and aren't cached), domains the model already classified
+domains come back `UNKNOWN`/`degraded` (and stay `UNKNOWN` for 10 minutes, so a down model is left alone), domains the model already classified
 are still served from the cache, the lists keep working, and `/ready` reports `degraded`.
 
 ## API
