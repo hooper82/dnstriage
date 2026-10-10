@@ -256,6 +256,9 @@ by CI.
 ## 11. Out of scope / future work
 
 - Persistent state: SQLite/Postgres adaptors for verdicts and client history.
+- Live reputation lookups: query a domain reputation API for domains the local lists don't cover,
+  with the lists kept as local overrides. Left out because every suitable API needs a key or
+  sign-up, which would break running with no configuration (C8).
 - Queue-based ingestion (Redis Streams, Kafka) for high volume.
 - Agentic enrichment (WHOIS, reputation) through scoped, read-only tools.
 - Log tailers for Pi-hole/dnsmasq and Zeek `dns.log`.

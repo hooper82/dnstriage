@@ -77,4 +77,5 @@ This is a proof of concept. DNS logs are pushed to this service, while reports a
 * Retention - Currently uses an in-memory data store, so state is lost on restart. This would need to move to a permanent DB such as SQLite or Postgres.
 * Alerting - Service doesn't have a threshold for how many bad-domains or any severity level for a query.
 * Context - There are good reasons for accessing BAD domains - this service only tracks, it makes no judgement as to if a node is compromised or not.
+* Live reputation - The blocklist and allowlist are static files, so they go out of date. A future version would ask a domain reputation API about each domain the local lists don't cover, keeping the local lists as overrides. Suitable APIs all need a key or sign-up, so this is left out to keep the service runnable with no configuration.
 * Security - No authentication, authorisation or TLS. Any client that can reach the service can push logs and read reports. Run it on a trusted network, or put it behind a reverse proxy that handles TLS and authentication.
