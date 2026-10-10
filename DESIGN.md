@@ -220,6 +220,7 @@ Dockerfile             # python:3.12-slim, non-root
 compose.yaml           # api + fake model (a real model service is added later)
 .github/workflows/     # CI
 requirements.txt       # exact pins
+requirements-dev.txt   # dev tools (ruff), kept out of the image
 README.md, DESIGN.md, CLAUDE.md, .claude/
 ```
 
@@ -227,13 +228,16 @@ The service listens on 8080, because 8000 is vLLM's default and 8001 is the fake
 
 ## 10. CI (GitHub Actions)
 
-Runs without a real model: `ruff check`, fail if `app/` exceeds 200 lines, build the image, then
-run `tests/smoke.py` twice:
+Runs on every pull request and push to `main`, without a real model: `ruff check`, build the image,
+then run `tests/smoke.py` twice:
 
 1. **With the fake model.** `/health` is OK, list tiers return their verdicts, and unknown domains
    get a verdict from source `llm`.
 2. **With the model endpoint unreachable.** Unknown domains come back `degraded` and `/ready` says
-   so. CI deliberately exercises the failure path.
+   so. CI deliberately exercises the failure path. This run is added with degraded mode.
+
+The 200-line budget is checked by hand on each PR (the `/work` checks and the reviewer agent), not
+by CI.
 
 ## 11. Out of scope / future work
 
