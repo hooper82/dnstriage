@@ -37,6 +37,21 @@ docker compose up --build
 python tests/smoke.py
 ```
 
+## API
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/health` | Liveness. |
+| `POST` | `/ingest` | Classify a batch (JSON array, up to 10,000) of DNS query records; returns one verdict per registrable domain. |
+
+A record looks like this:
+
+```json
+{ "ts": "2026-10-07T06:00:00Z", "client": "10.0.0.12", "domain": "example.com", "qtype": "A", "rcode": "NOERROR" }
+```
+
+Interactive docs are at http://localhost:8080/docs.
+
 ## Documents
 
 - [DESIGN.md](DESIGN.md): purpose, architecture, decisions and threat model.
