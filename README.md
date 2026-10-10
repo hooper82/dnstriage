@@ -3,7 +3,39 @@
 A small inference service that classifies DNS domains as GOOD, WARN, BAD or UNKNOWN, using curated lists first and falling back to an LLM for unknown domains.
 
 > **Status: work in progress.**
-> Quick start, configuration and a sample run will appear here as features land.
+> Configuration and a sample run will appear here as features land.
+
+## Quick start
+
+Needs Python 3.12+ (or just Docker). The service listens on http://localhost:8080.
+
+**Linux / macOS**
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+.venv/bin/python -m uvicorn app.main:app --port 8080
+```
+
+**Windows (PowerShell)**
+
+```powershell
+py -3.12 -m venv .venv
+.venv\Scripts\pip install -r requirements.txt
+.venv\Scripts\python -m uvicorn app.main:app --port 8080
+```
+
+**Docker**
+
+```bash
+docker compose up --build
+```
+
+**Check it works.** In a second terminal, run the smoke test (standard library only, so any Python 3 will do):
+
+```bash
+python tests/smoke.py
+```
 
 ## Documents
 

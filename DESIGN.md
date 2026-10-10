@@ -212,7 +212,7 @@ The sample batch includes an injection-style domain so the demo shows the case.
 ## 9. Repository layout
 
 ```
-app/main.py            # the service — all budgeted Python
+app/main.py            # the service (FastAPI + uvicorn, port 8080) — all budgeted Python
 data/                  # small sample allowlist, blocklist and sample_batch.json
 tests/smoke.py         # stdlib-only API checks (not budgeted)
 tests/fake_model.py    # stdlib-only fake OpenAI endpoint, random verdicts (not budgeted)
@@ -222,6 +222,8 @@ compose.yaml           # api + fake model (a real model service is added later)
 requirements.txt       # exact pins
 README.md, DESIGN.md, CLAUDE.md, .claude/
 ```
+
+The service listens on 8080, because 8000 is vLLM's default and 8001 is the fake model.
 
 ## 10. CI (GitHub Actions)
 
