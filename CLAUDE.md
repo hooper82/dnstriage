@@ -65,7 +65,7 @@ Start-Process py tests/fake_model.py   # fake model on 8001, own window
 ```
 
 Checks: `ruff check .` (CI runs it too), the line-budget command above,
-`python tests/smoke.py` against a running service, and `docker build .` when the Dockerfile or
+`python tests/smoke.py` against a running service (and `--model-down` with the fake model stopped), and `docker build .` when the Dockerfile or
 dependencies change.
 
 Tests are deliberately minimal: `tests/smoke.py` uses only the standard library (`urllib`) to call

@@ -1,6 +1,8 @@
 """Smoke test: call the running service and check its responses.
 
-Usage: python tests/smoke.py [base_url]    (default http://localhost:8080)
+Usage: python tests/smoke.py [--model-down] [base_url]    (default http://localhost:8080)
+
+--model-down: the model endpoint has been stopped; expect degraded verdicts and /ready = degraded.
 """
 import json
 import sys
@@ -8,7 +10,9 @@ import time
 import urllib.error
 import urllib.request
 
-BASE = sys.argv[1].rstrip("/") if len(sys.argv) > 1 else "http://localhost:8080"
+MODEL_DOWN = "--model-down" in sys.argv
+args = [a for a in sys.argv[1:] if a != "--model-down"]
+BASE = args[0].rstrip("/") if args else "http://localhost:8080"
 failures = 0
 
 
@@ -62,15 +66,23 @@ check("blocklisted host under an allowlisted domain is BAD (bad.example.com)",
       verdicts.get("bad.example.com") == ("BAD", "blocklist"))
 check("blocklisted registrable domain catches its subdomains (x.evil.github.io)",
       verdicts.get("evil.github.io") == ("BAD", "blocklist"))
-check("allowlisting github.io doesn't cover other *.github.io sites (goes to the model)",
-      verdicts.get("someone.github.io", ("", ""))[1] == "llm")
-model = entries.get("localhost", {})
-check("unlisted domain is classified by the model (localhost)",
-      model.get("source") == "llm" and model.get("verdict") in ("GOOD", "WARN", "BAD"))
-check("model verdict has a confidence 0-1 and a reason of at most 200 characters",
-      0 <= model.get("confidence", -1) <= 1 and 0 < len(model.get("reason", "")) <= 200)
-check("model output that breaks the schema fails cautious (WARN/llm_invalid)",
-      verdicts.get("smoke-invalid-output.com") == ("WARN", "llm_invalid"))
+model_names = ["someone.github.io", "localhost", "smoke-invalid-output.com"]
+if MODEL_DOWN:
+    check("with the model down, unlisted domains are UNKNOWN/degraded",
+          all(verdicts.get(d) == ("UNKNOWN", "degraded") for d in model_names))
+    check("GET /ready reports degraded", get("/ready") == (200, {"status": "degraded"}))
+    check("GET /health stays ok while degraded", get("/health") == (200, {"status": "ok"}))
+else:
+    check("allowlisting github.io doesn't cover other *.github.io sites (goes to the model)",
+          verdicts.get("someone.github.io", ("", ""))[1] == "llm")
+    model = entries.get("localhost", {})
+    check("unlisted domain is classified by the model (localhost)",
+          model.get("source") == "llm" and model.get("verdict") in ("GOOD", "WARN", "BAD"))
+    check("model verdict has a confidence 0-1 and a reason of at most 200 characters",
+          0 <= model.get("confidence", -1) <= 1 and 0 < len(model.get("reason", "")) <= 200)
+    check("model output that breaks the schema fails cautious (WARN/llm_invalid)",
+          verdicts.get("smoke-invalid-output.com") == ("WARN", "llm_invalid"))
+    check("GET /ready reports ok", get("/ready") == (200, {"status": "ok"}))
 
 bad = record("x.com")
 del bad["domain"]

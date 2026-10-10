@@ -116,6 +116,16 @@ a reply that breaks the schema, so the fail-cautious path is tested too.
 **Degraded mode.** If the model is unreachable, times out or errors, the verdict is `UNKNOWN` with source `degraded`. It is not cached, `/ready` reports `degraded`, `/health`
 stays OK, and a metric is incremented. The list tiers keep working.
 
+- **No SDK retries** (`max_retries=0`), so `LLM_TIMEOUT_S` means what it says (the default 2 retries
+  could triple it). Trade-off: a transient 429/503 from a real backend degrades that domain at once,
+  which is acceptable because degraded results aren't cached and the next ingest tries again.
+- **`/ready` reports the outcome of the most recent model call**, and always returns 200. It is a
+  status report, not a gate: a 503 readiness probe would pull the service out of rotation, no
+  traffic would reach the model, and it could never recover. Before the first call it says `ok`.
+  An invalid reply still counts as `ok`: the model was reachable.
+- A reply with no usable message (missing or empty `choices`, or a choice with no `message`, as some
+  gateways send with HTTP 200) is treated as invalid output (`WARN`/`llm_invalid`), not a 500.
+
 ## 4. API
 
 | Method | Path | Purpose |
@@ -221,7 +231,7 @@ The sample batch includes an injection-style domain so the demo shows the case.
 | `MODEL_NAME` | `random` | Model to use. The fake model ignores it. |
 | `ALLOWLIST_PATH` | `data/allowlist.txt` | One registrable domain per line (`www.example.com` would never match). |
 | `BLOCKLIST_PATH` | `data/blocklist.txt` | One domain per line, or hosts-file format; `#` starts a comment. |
-| `LLM_TIMEOUT_S` | `20` | Per-call timeout. |
+| `LLM_TIMEOUT_S` | `20` | Per-request timeout in seconds (applies to connecting and to reading the reply; not a total cap). |
 | `LLM_MAX_CONCURRENCY` | `4` | Concurrent model calls. |
 | `CACHE_TTL_S` | `86400` | Verdict cache lifetime. |
 
@@ -250,7 +260,8 @@ then run `tests/smoke.py` twice:
 1. **With the fake model.** `/health` is OK, list tiers return their verdicts, and unknown domains
    get a verdict from source `llm`.
 2. **With the model endpoint unreachable.** Unknown domains come back `degraded` and `/ready` says
-   so. CI deliberately exercises the failure path. This run is added with degraded mode.
+   so. CI deliberately exercises the failure path: it stops the fake model and reruns
+   `tests/smoke.py --model-down` against the same service.
 
 The 200-line budget is checked by hand on each PR (the `/work` checks and the reviewer agent), not
 by CI.
@@ -266,4 +277,5 @@ by CI.
 - Log tailers for Pi-hole/dnsmasq and Zeek `dns.log`.
 - Domain-age signal from WHOIS (libraries are unreliable and rate-limited).
 - An evaluation harness: labelled DGA/GOOD sets to measure precision and recall per model.
-- Kubernetes manifests with a `/ready` probe and autoscaling.
+- Kubernetes manifests with autoscaling. A gating readiness probe would need `/ready` to actively
+  probe the model rather than report the last call (see Degraded mode).
