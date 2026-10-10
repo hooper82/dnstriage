@@ -1,0 +1,5 @@
+# Sample blocklist for demos and tests. Replace with a real feed (e.g. abuse.ch URLhaus hostfile)
+# via BLOCKLIST_PATH. Domains only: one per line, or hosts-file format. A listed host gets its
+# own verdict; it does not condemn its parent domain.
+evil.github.io
+0.0.0.0 bad.example.com   # a compromised host under an allowlisted domain

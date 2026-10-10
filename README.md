@@ -3,7 +3,7 @@
 A small inference service that classifies DNS domains as GOOD, WARN, BAD or UNKNOWN, using curated lists first and falling back to an LLM for unknown domains.
 
 > **Status: work in progress.**
-> Configuration and a sample run will appear here as features land.
+> A sample run will appear here as features land.
 
 ## Quick start
 
@@ -51,6 +51,17 @@ A record looks like this:
 ```
 
 Interactive docs are at http://localhost:8080/docs.
+
+## Configuration
+
+All settings are optional environment variables; the defaults run the demo as-is.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `BLOCKLIST_PATH` | `data/blocklist.txt` | Known-bad domains (`BAD`). One per line or hosts-file format, e.g. the abuse.ch URLhaus hostfile. |
+| `ALLOWLIST_PATH` | `data/allowlist.txt` | Known-good registrable domains (`GOOD`), e.g. the Tranco top 100k. |
+
+The bundled lists are tiny samples with fake or reserved names. Lists are read at startup.
 
 ## Documents
 

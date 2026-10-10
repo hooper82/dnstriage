@@ -1,0 +1,6 @@
+# Sample allowlist for demos and tests. Replace with a real list (e.g. the Tranco top 100k)
+# via ALLOWLIST_PATH. Registrable domains only, one per line: www.example.com would never match.
+example.com
+github.io
+wikipedia.org
+python.org
