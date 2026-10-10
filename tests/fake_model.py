@@ -1,6 +1,7 @@
 """Fake OpenAI-compatible model: answers every chat completion with a random verdict.
 
-A request mentioning smoke-invalid-output gets a reply that breaks the schema (an over-long reason).
+A request mentioning smoke-invalid-output gets a reply that breaks the schema (an over-long reason);
+one mentioning smoke-slow is answered after 1 s.
 
 Test tooling, standard library only. Lets the LLM tier run with no real model, no GPU and no
 configuration. Its verdicts are meaningless.
@@ -26,6 +27,8 @@ class FakeModel(BaseHTTPRequestHandler):
         }
         if b"smoke-invalid-output" in request:  # test trigger: a reason over the 200-character limit
             verdict["reason"] = "x" * 201
+        if b"smoke-slow" in request:  # test trigger: a slow model, so concurrent requests overlap
+            time.sleep(1)
         body = json.dumps({
             "id": f"fake-{time.time_ns()}",
             "object": "chat.completion",

@@ -4,9 +4,11 @@ Usage: python tests/smoke.py [--model-down] [base_url]    (default http://localh
 
 --model-down: the model endpoint has been stopped; expect degraded verdicts and /ready = degraded.
 Run it after a normal run against the same service: it expects that run's cached verdicts.
+The concurrency checks assume the default LLM_MAX_CONCURRENCY of 4.
 """
 import json
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -82,6 +84,9 @@ if MODEL_DOWN:
     check("degraded results aren't cached (GET /domains is 404)", get(f"/domains/{fresh}")[0] == 404)
     check("a verdict cached by the earlier normal run is still served (localhost)",
           verdicts.get("localhost", ("", ""))[1] == "cache")
+    status, body = post("/ingest", [record(f"down{i}-{run}.com") for i in range(10)])
+    check("with the model down, a batch stops calling it after the first wave (1-4 calls for 10 domains)",
+          1 <= body.get("model_calls", 0) <= 4 and all(d["source"] == "degraded" for d in body["domains"]))
     check("GET /ready reports degraded", get("/ready") == (200, {"status": "degraded"}))
     check("GET /health stays ok while degraded", get("/health") == (200, {"status": "ok"}))
 else:
@@ -102,6 +107,22 @@ else:
     check("invalid model output isn't cached", again["smoke-invalid-output.com"]["source"] == "llm_invalid")
     check("GET /domains returns the cached model verdict with its original source",
           get(f"/domains/{fresh}") == (200, model))
+    # Two clients send the same 8 new domains at once; the fake model takes 1 s per smoke-slow call.
+    slow = [record(f"smoke-slow-{i}-{run}.com") for i in range(8)]
+    replies = []
+    threads = [threading.Thread(target=lambda: replies.append(post("/ingest", slow))) for _ in range(2)]
+    started = time.monotonic()
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    elapsed = time.monotonic() - started
+    check("concurrent requests share in-flight model calls (8 calls for 2 x 8 domains, not 16)",
+          sum(r[1].get("model_calls", 0) for r in replies) == 8)
+    check("shared calls return model verdicts to both requests",
+          all(d["source"] == "llm" for r in replies for d in r[1].get("domains", [])) and len(replies) == 2)
+    check(f"model calls run concurrently but capped at 4 (8 x 1 s calls took {elapsed:.1f}s, expect ~2)",
+          1.5 <= elapsed <= 6)
     check("GET /ready reports ok", get("/ready") == (200, {"status": "ok"}))
 
 bad = record("x.com")

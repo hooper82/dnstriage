@@ -53,7 +53,7 @@ are still served from the cache, the lists keep working, and `/ready` reports `d
 | `GET` | `/health` | Liveness. |
 | `GET` | `/domains/{domain}` | A domain's verdict: from the lists, else the cached model verdict, else 404. |
 | `GET` | `/ready` | Model status: `ok`, or `degraded` if the last model call failed. Always HTTP 200. |
-| `POST` | `/ingest` | Classify a batch (JSON array, up to 10,000) of DNS query records; returns one verdict per registrable domain. |
+| `POST` | `/ingest` | Classify a batch (JSON array, up to 10,000) of DNS query records; returns one verdict per registrable domain, and `model_calls`. |
 
 A record looks like this:
 
@@ -75,6 +75,7 @@ All settings are optional environment variables; the defaults run the demo as-is
 | `OPENAI_API_KEY` | `not-needed` | Key for the endpoint, if it needs one. |
 | `MODEL_NAME` | `random` | Model to use (the fake model ignores it). |
 | `CACHE_TTL_S` | `86400` | Seconds to keep a model verdict before asking the model again. |
+| `LLM_MAX_CONCURRENCY` | `4` | Model calls allowed in flight at once. |
 | `LLM_TIMEOUT_S` | `20` | Seconds to wait for the model before marking a domain `degraded`. |
 
 The bundled lists are tiny samples with fake or reserved names. Lists are read at startup.
