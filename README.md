@@ -52,6 +52,7 @@ are still served from the cache, the lists keep working, and `/ready` reports `d
 |---|---|---|
 | `GET` | `/health` | Liveness. |
 | `GET` | `/domains/{domain}` | A domain's verdict: from the lists, else the cached model verdict, else 404. |
+| `GET` | `/metrics` | Prometheus metrics: `dnstriage_decisions_total` by `source` (redirects to `/metrics/`). |
 | `GET` | `/ready` | Model status: `ok`, or `degraded` if the last model call failed. Always HTTP 200. |
 | `POST` | `/ingest` | Classify a batch (JSON array, up to 10,000) of DNS query records; returns one verdict per registrable domain, and `model_calls`. |
 
