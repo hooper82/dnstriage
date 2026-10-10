@@ -3,6 +3,7 @@
 Usage: python tests/smoke.py [--model-down] [base_url]    (default http://localhost:8080)
 
 --model-down: the model endpoint has been stopped; expect degraded verdicts and /ready = degraded.
+Run it after a normal run against the same service: it expects that run's cached verdicts.
 """
 import json
 import sys
@@ -17,8 +18,11 @@ failures = 0
 
 
 def get(path):
-    with urllib.request.urlopen(BASE + path, timeout=5) as resp:
-        return resp.status, json.load(resp)
+    try:
+        with urllib.request.urlopen(BASE + path, timeout=5) as resp:
+            return resp.status, json.load(resp)
+    except urllib.error.HTTPError as err:
+        return err.code, json.load(err)
 
 
 def post(path, payload):
@@ -52,36 +56,52 @@ else:
 
 check("GET /health returns 200 and status ok", status == 200 and body == {"status": "ok"})
 
-names = ["a.example.com", "B.Example.COM.", "bad.example.com", "x.evil.github.io", "someone.github.io", "localhost",
+# Fresh names each run, so reruns against the same service aren't served from the cache.
+run = time.time_ns()
+fresh, fresh_gh = f"smoke{run}.com", f"someone{run}.github.io"
+names = ["a.example.com", "B.Example.COM.", "bad.example.com", "x.evil.github.io", fresh_gh, fresh, "localhost",
          "smoke-invalid-output.com"]
 status, body = post("/ingest", [record(d) for d in names])
 entries = {d["domain"]: d for d in body.get("domains", [])}
 verdicts = {d: (e["verdict"], e["source"]) for d, e in entries.items()}
 check("POST /ingest returns 200", status == 200)
 check("ingest groups names by registrable domain, blocklisted hosts separately",
-      list(verdicts) == ["example.com", "bad.example.com", "evil.github.io", "someone.github.io", "localhost",
+      list(verdicts) == ["example.com", "bad.example.com", "evil.github.io", fresh_gh, fresh, "localhost",
                          "smoke-invalid-output.com"])
 check("allowlisted domain is GOOD (example.com)", verdicts.get("example.com") == ("GOOD", "allowlist"))
 check("blocklisted host under an allowlisted domain is BAD (bad.example.com)",
       verdicts.get("bad.example.com") == ("BAD", "blocklist"))
 check("blocklisted registrable domain catches its subdomains (x.evil.github.io)",
       verdicts.get("evil.github.io") == ("BAD", "blocklist"))
-model_names = ["someone.github.io", "localhost", "smoke-invalid-output.com"]
+check("GET /domains normalises the name and answers from the lists (www.example.com)",
+      get("/domains/www.example.com") == (200, {"domain": "example.com", "verdict": "GOOD", "source": "allowlist"}))
+check("GET /domains for a never-seen domain is 404", get(f"/domains/never{run}.com")[0] == 404)
 if MODEL_DOWN:
-    check("with the model down, unlisted domains are UNKNOWN/degraded",
-          all(verdicts.get(d) == ("UNKNOWN", "degraded") for d in model_names))
+    check("with the model down, new unlisted domains are UNKNOWN/degraded",
+          all(verdicts.get(d) == ("UNKNOWN", "degraded") for d in [fresh_gh, fresh, "smoke-invalid-output.com"]))
+    check("degraded results aren't cached (GET /domains is 404)", get(f"/domains/{fresh}")[0] == 404)
+    check("a verdict cached by the earlier normal run is still served (localhost)",
+          verdicts.get("localhost", ("", ""))[1] == "cache")
     check("GET /ready reports degraded", get("/ready") == (200, {"status": "degraded"}))
     check("GET /health stays ok while degraded", get("/health") == (200, {"status": "ok"}))
 else:
     check("allowlisting github.io doesn't cover other *.github.io sites (goes to the model)",
-          verdicts.get("someone.github.io", ("", ""))[1] == "llm")
-    model = entries.get("localhost", {})
-    check("unlisted domain is classified by the model (localhost)",
+          verdicts.get(fresh_gh, ("", ""))[1] == "llm")
+    model = entries.get(fresh, {})
+    check("unlisted domain is classified by the model",
           model.get("source") == "llm" and model.get("verdict") in ("GOOD", "WARN", "BAD"))
     check("model verdict has a confidence 0-1 and a reason of at most 200 characters",
           0 <= model.get("confidence", -1) <= 1 and 0 < len(model.get("reason", "")) <= 200)
     check("model output that breaks the schema fails cautious (WARN/llm_invalid)",
           verdicts.get("smoke-invalid-output.com") == ("WARN", "llm_invalid"))
+    check("localhost is classified by the model, or served from an earlier run's cache",
+          verdicts.get("localhost", ("", ""))[1] in ("llm", "cache"))
+    again = {d["domain"]: d for d in post("/ingest", [record(fresh), record("smoke-invalid-output.com")])[1]["domains"]}
+    check("a repeat domain is served from the cache, with the same verdict",
+          again[fresh]["source"] == "cache" and again[fresh]["verdict"] == model.get("verdict"))
+    check("invalid model output isn't cached", again["smoke-invalid-output.com"]["source"] == "llm_invalid")
+    check("GET /domains returns the cached model verdict with its original source",
+          get(f"/domains/{fresh}") == (200, model))
     check("GET /ready reports ok", get("/ready") == (200, {"status": "ok"}))
 
 bad = record("x.com")

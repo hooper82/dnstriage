@@ -48,9 +48,9 @@ POST /ingest (batch of DNS query records)
 Normalise ─── lowercase, strip trailing dot, split into registrable domain + subdomain labels
    │  (once per unique key: registrable domain, or the full name if blocklisted)
    ▼
-1. Verdict cache ──── hit ──► cached verdict
-2. Blocklist ──────── hit ──► BAD
-3. Allowlist ──────── hit ──► GOOD
+1. Blocklist ──────── hit ──► BAD           (local, authoritative)
+2. Allowlist ──────── hit ──► GOOD          (local, authoritative)
+3. Verdict cache ──── hit ──► earlier model verdict
 4. Enrichment ─────── resolves? NS/MX, unique-subdomain count, sample labels, NXDOMAIN ratio
 5. LLM verdict ────── JSON-schema constrained, validated
 ```
@@ -62,8 +62,10 @@ behind an allowlisted parent.
 **Cache key: registrable domain.** A DNS tunnel produces thousands of unique subdomains under one
 domain. Keying on the registrable domain means one model call, and the model sees the *pattern*
 (subdomain count and sample labels) rather than one name. The one exception: a name that is itself
-on the blocklist is its own key (see Lists). Verdicts expire after a TTL. Degraded results are
-never cached.
+on the blocklist is its own key (see Lists). Only valid **model** verdicts are cached: list hits
+are already instant and checked first, and `llm_invalid` and `degraded` results are never cached.
+Entries expire after `CACHE_TTL_S`; expired ones stay in memory until overwritten. While the model
+is down, domains it already classified keep being served from the cache.
 
 **Lists.** Both load at startup from paths in env vars.
 
@@ -131,7 +133,7 @@ stays OK, and a metric is incremented. The list tiers keep working.
 | Method | Path | Purpose |
 |---|---|---|
 | `POST` | `/ingest` | Classify a batch of records; returns per-domain verdicts and a count of model calls. |
-| `GET` | `/domains/{domain}` | Cached verdict and evidence for a domain. |
+| `GET` | `/domains/{domain}` | A domain's verdict: from the lists, else the cached model verdict, else 404. The name is normalised. (Evidence is added with enrichment.) |
 | `GET` | `/clients` | All clients, each with a count of domains per verdict. |
 | `GET` | `/clients/{ip}` | One client's domains and their verdicts. |
 | `GET` | `/health` | Liveness. |
@@ -155,7 +157,8 @@ Ingestion is synchronous: `/ingest` returns once the batch is classified.
 | `dnstriage_llm_requests_total` | Counter | `outcome` = ok, invalid, timeout, error |
 | `dnstriage_degraded_total` | Counter | — |
 
-The README will show a sample run, e.g. "10,000 queries → 400 unique domains → 12 model calls".
+A `cache` decision always means a model call was avoided. The README will show a sample run, e.g.
+"10,000 queries → 400 unique domains → 12 model calls".
 
 ## 6. Key decisions
 
@@ -164,7 +167,7 @@ The README will show a sample run, e.g. "10,000 queries → 400 unique domains �
 | D1 | OpenAI-compatible API only | Vendor SDKs, proprietary APIs (e.g. Jev) | Portable; runs with an open model. |
 | D2 | Pydantic for schema and validation | `response_format` alone | Not all backends enforce schemas. |
 | D3 | Enrichment in code | Agentic tool calling | Tools widen the prompt-injection surface; backend support varies. |
-| D4 | Lists and cache before the model | Everything to the model | The model only sees genuinely unknown domains. |
+| D4 | Lists, then cache, before the model | Everything to the model | The model only sees genuinely unknown domains. |
 | D5 | Key on registrable domain (or the full name when it is itself blocklisted) | Key on full name | Tunnelling can't explode model calls; the model judges the pattern; one listed host can't condemn its parent domain. |
 | D6 | Fail cautious on bad output, visible on outage | Default to GOOD | A broken indicator that says "GOOD" is worse than none. |
 | D7 | In-memory state | A database | Line budget and simplicity. State is lost on restart. A real deployment would add SQLite/Postgres adaptors. No migrations. |
@@ -179,7 +182,9 @@ The README will show a sample run, e.g. "10,000 queries → 400 unique domains �
 - **Verdicts are advisory.** Nothing blocks traffic; a human analyst decides.
 - **Data sovereignty.** DNS logs reveal internal hosts and behaviour. Recommend a self-hosted model.
 - **Resource exhaustion.** Batch size limit, model concurrency cap, and the registrable-domain cache
-  bound what an attacker can cost by generating unique names. The batch limit counts records, not
+  bound what an attacker can cost. The cache bounds tunnelling (one key however many subdomains),
+  not DGA: every new registrable domain costs a model call and a cache entry, and memory grows with
+  unique domains until restart (D7). The batch limit counts records, not
   bytes: the whole body is parsed first, so a reverse proxy should cap request size.
 
 ### 7.1 Prompt injection via domain names
@@ -193,7 +198,7 @@ readable instruction still fits, five sample labels allow roughly 300 characters
 (`xn--…`) can carry Unicode the model may decode.
 
 **What a successful injection gets the attacker:**
-- A `GOOD` verdict for their domain, **cached for the TTL** (24 hours by default). Because the cache
+- A model `GOOD` verdict for their domain, **cached for the TTL** (24 hours by default). Because the cache
   is keyed on the registrable domain, every subdomain under it, including tunnelling and beaconing
   traffic, then skips the model too. One successful injection can hide a C2 domain for a day.
 - Text of their choosing in `reason`, shown to the analyst (e.g. "verified safe by IT"), or aimed at
@@ -215,7 +220,7 @@ defence against prompt injection today, so the README states this plainly. Optio
 proof of concept:
 - Never accept `GOOD` from the model: it may only answer `WARN` or `BAD`, and `GOOD` comes only
   from the allowlist.
-- Cache model `GOOD` verdicts for much less time than list verdicts.
+- Cache model `GOOD` verdicts for much less time than other model verdicts.
 - Pre-flag labels that read like natural language (several dictionary words joined by hyphens) as
   `WARN` before the model sees them.
 - Add injection-style domains to the evaluation set and measure how often each model is fooled.
@@ -259,8 +264,8 @@ then run `tests/smoke.py` twice:
 
 1. **With the fake model.** `/health` is OK, list tiers return their verdicts, and unknown domains
    get a verdict from source `llm`.
-2. **With the model endpoint unreachable.** Unknown domains come back `degraded` and `/ready` says
-   so. CI deliberately exercises the failure path: it stops the fake model and reruns
+2. **With the model endpoint unreachable.** New unknown domains come back `degraded` (and are not
+   cached), domains cached by the normal run are still served, and `/ready` says so. CI deliberately exercises the failure path: it stops the fake model and reruns
    `tests/smoke.py --model-down` against the same service.
 
 The 200-line budget is checked by hand on each PR (the `/work` checks and the reviewer agent), not
