@@ -21,8 +21,9 @@ The design lives in `DESIGN.md`. Keep it true: if a change alters a decision rec
 - **In-memory state only.** No database, no migrations. The README notes that a real deployment would need SQLite/Postgres adaptors.
 - **Runs on Windows and Linux, locally and in Docker.** No bash-only steps in the run or test path.
   Use `pathlib`, not hard-coded separators.
-- **No real model yet.** Build and test against the fake model (`tests/fake_model.py`), which the
-  defaults point at, so nothing needs configuring. A real model is added once everything else works.
+- **Fake model by default.** Build and test against the fake model (`tests/fake_model.py`), which the
+  defaults point at, so nothing needs configuring. Claude (Sonnet 5.5, via the native Anthropic SDK)
+  is used only when the user exports `ANTHROPIC_*`/`MODEL_NAME`; never print or commit a key.
 - **Dependencies:** plain `pip` with exact pins in `requirements.txt`. Python 3.12. Ask before adding
   any new dependency.
 
