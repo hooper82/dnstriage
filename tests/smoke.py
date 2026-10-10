@@ -1,4 +1,4 @@
-"""Smoke test: call the running service and check its responses. Standard library only.
+"""Smoke test: call the running service and check its responses.
 
 Usage: python tests/smoke.py [base_url]    (default http://localhost:8080)
 """
