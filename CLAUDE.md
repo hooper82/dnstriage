@@ -37,7 +37,7 @@ Sequential, one unit of work at a time, on a feature branch (no worktrees).
 4. **PR.** Push the branch and open a PR with `/pr`. Stop. The user reviews and merges.
 
 **One PR = one unit of work**: a single behaviour you can describe in one sentence (e.g. "look up a
-domain's cached verdict via `GET /domains/{domain}`"). If a change grows beyond that, stop and
+domain's verdict from the blocklist"). If a change grows beyond that, stop and
 propose splitting it into another issue.
 
 **Commits:** each one makes sense on its own; short imperative messages ("Add blocklist tier"), no

@@ -45,8 +45,14 @@ def decisions(source):
     return next((float(line.removeprefix(sample)) for line in text.splitlines() if line.startswith(sample)), 0.0)
 
 
-def record(domain):
-    return {"ts": "2026-10-07T06:00:00Z", "client": "10.0.0.12", "domain": domain, "qtype": "A", "rcode": "NOERROR"}
+def record(domain, client="10.0.0.12"):
+    return {"ts": "2026-10-07T06:00:00Z", "client": client, "domain": domain, "qtype": "A", "rcode": "NOERROR"}
+
+
+def current(client, domain):
+    """The verdict GET /clients shows for one domain under one client (None if absent)."""
+    view = next((c for c in get("/clients")[1] if c["client"] == client), {"domains": []})
+    return next((d for d in view["domains"] if d["domain"] == domain), None)
 
 
 def check(name, condition):
@@ -58,14 +64,14 @@ def check(name, condition):
 # Wait for the service to come up (e.g. straight after `docker compose up`).
 for _ in range(60):
     try:
-        status, body = get("/health")
+        status, body = get("/ready")
         break
     except OSError:
         time.sleep(0.5)
 else:
     sys.exit(f"FAIL service not reachable at {BASE}")
 
-check("GET /health returns 200 and status ok", status == 200 and body == {"status": "ok"})
+check("GET /ready answers 200 (it doubles as the liveness check)", status == 200 and "status" in body)
 
 # Fresh names each run, so reruns against the same service aren't served from the cache.
 run = time.time_ns()
@@ -84,9 +90,12 @@ check("blocklisted host under an allowlisted domain is BAD (bad.example.com)",
       verdicts.get("bad.example.com") == ("BAD", "blocklist"))
 check("blocklisted registrable domain catches its subdomains (x.evil.github.io)",
       verdicts.get("evil.github.io") == ("BAD", "blocklist"))
-check("GET /domains normalises the name and answers from the lists (www.example.com)",
-      get("/domains/www.example.com") == (200, {"domain": "example.com", "verdict": "GOOD", "source": "allowlist"}))
-check("GET /domains for a never-seen domain is 404", get(f"/domains/never{run}.com")[0] == 404)
+check("GET /clients shows each client's domains with their verdicts (example.com under 10.0.0.12)",
+      current("10.0.0.12", "example.com") == {"domain": "example.com", "verdict": "GOOD", "source": "allowlist"})
+worried, calm = f"smoke-bad-{run}", f"smoke-good-{run}"
+post("/ingest", [record("example.com", calm), record("bad.example.com", worried)])  # calm first: only a sort reorders
+order = [c["client"] for c in get("/clients")[1]]
+check("GET /clients lists clients with more BAD domains first", order.index(worried) < order.index(calm))
 before = decisions("allowlist")
 post("/ingest", [record("example.com")])
 check("GET /metrics counts decisions by source (one more allowlist decision)", decisions("allowlist") == before + 1)
@@ -97,8 +106,8 @@ check("the sample batch is accepted and groups 50 records into 19 keys",
 if MODEL_DOWN:
     check("with the model down, new unlisted domains are UNKNOWN/degraded",
           all(verdicts.get(d) == ("UNKNOWN", "degraded") for d in [fresh_gh, fresh, invalid]))
-    check("a degraded result is cached for a while (GET /domains returns it)",
-          get(f"/domains/{fresh}") == (200, {"domain": fresh, "verdict": "UNKNOWN", "source": "degraded"}))
+    check("GET /clients shows the degraded result under the client that queried it",
+          current("10.0.0.12", fresh) == {"domain": fresh, "verdict": "UNKNOWN", "source": "degraded"})
     check("a repeat domain gets the cached UNKNOWN without calling the model",
           post("/ingest", [record(fresh)])[1].get("domains") == [{"domain": fresh, "verdict": "UNKNOWN", "source": "cache"}])
     check("a verdict cached by the earlier normal run is still served (localhost)",
@@ -108,10 +117,10 @@ if MODEL_DOWN:
     check("GET /metrics counts each degraded decision (10 for a 10-domain batch)", decisions("degraded") == before + 10)
     check("with the model down, a batch stops calling it after the first wave (1-4 calls for 10 domains)",
           1 <= body.get("model_calls", 0) <= 4 and all(d["source"] == "degraded" for d in body["domains"]))
+    repeat = post("/ingest", [record(f"down{i}-{run}.com") for i in range(10)])[1]
     check("every domain in that batch is cached as UNKNOWN, skipped ones included",
-          all(get(f"/domains/down{i}-{run}.com")[0] == 200 for i in range(10)))
+          repeat.get("model_calls") == 0 and all(d["source"] == "cache" for d in repeat["domains"]))
     check("GET /ready reports degraded", get("/ready") == (200, {"status": "degraded"}))
-    check("GET /health stays ok while degraded", get("/health") == (200, {"status": "ok"}))
 else:
     check("allowlisting github.io doesn't cover other *.github.io sites (goes to the model)",
           verdicts.get(fresh_gh, ("", ""))[1] == "llm")
@@ -130,12 +139,14 @@ else:
           verdicts.get(invalid) == ("WARN", "llm_invalid"))
     check("localhost is classified by the model, or served from an earlier run's cache",
           verdicts.get("localhost", ("", ""))[1] in ("llm", "cache"))
+    check("GET /clients shows the model verdict, with its evidence, under the client", current("10.0.0.12", fresh) == model)
     again = {d["domain"]: d for d in post("/ingest", [record(fresh), record(invalid)])[1]["domains"]}
     check("a repeat domain is served from the cache, with the same verdict",
           again[fresh]["source"] == "cache" and again[fresh]["verdict"] == model.get("verdict"))
     check("invalid model output isn't cached", again[invalid]["source"] == "llm_invalid")
-    check("GET /domains returns the cached model verdict with its original source",
-          get(f"/domains/{fresh}") == (200, model))
+    check("an invalid model reply stays visible as WARN in GET /clients (not UNKNOWN)",
+          current("10.0.0.12", invalid) == {"domain": invalid, "verdict": "WARN", "source": "llm_invalid",
+                                            "evidence": again[invalid]["evidence"]})
     # Two clients send the same 8 new domains at once; the fake model takes 1 s per smoke-slow call.
     slow = [record(f"smoke-slow-{i}-{run}.com") for i in range(8)]
     replies = []
