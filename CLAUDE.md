@@ -50,6 +50,7 @@ Setup and run (Linux / macOS):
 
 ```
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+.venv/bin/pip install -r requirements-dev.txt   # ruff, for the checks
 .venv/bin/python -m uvicorn app.main:app --port 8080
 ```
 
@@ -57,10 +58,11 @@ Setup and run (Windows PowerShell; no activation needed, so execution policy doe
 
 ```
 py -3.12 -m venv .venv; .venv\Scripts\pip install -r requirements.txt
+.venv\Scripts\pip install -r requirements-dev.txt   # ruff, for the checks
 .venv\Scripts\python -m uvicorn app.main:app --port 8080
 ```
 
-Checks, once the files exist: `ruff check .`, the line-budget command above,
+Checks: `ruff check .` (CI runs it too), the line-budget command above,
 `python tests/smoke.py` against a running service, and `docker build .` when the Dockerfile or
 dependencies change.
 

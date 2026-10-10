@@ -23,7 +23,7 @@ def check(name, condition):
 
 
 # Wait for the service to come up (e.g. straight after `docker compose up`).
-for _ in range(20):
+for _ in range(60):
     try:
         status, body = get("/health")
         break
