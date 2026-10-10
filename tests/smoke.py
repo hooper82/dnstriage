@@ -102,6 +102,12 @@ else:
           model.get("source") == "llm" and model.get("verdict") in ("GOOD", "WARN", "BAD"))
     check("model verdict has a confidence 0-1 and a reason of at most 200 characters",
           0 <= model.get("confidence", -1) <= 1 and 0 < len(model.get("reason", "")) <= 200)
+    evidence = model.get("evidence", {})
+    check("model verdict carries DNS and RDAP evidence (records, or an explicit reason there are none)",
+          set(evidence) == {"addresses", "nameservers", "mail", "registered"}
+          and all(isinstance(v, list) or v in ("domain does not exist", "no records", "lookup failed")
+                  for k, v in evidence.items() if k != "registered")
+          and isinstance(evidence["registered"], str))
     check("model output that breaks the schema fails cautious (WARN/llm_invalid)",
           verdicts.get(invalid) == ("WARN", "llm_invalid"))
     check("localhost is classified by the model, or served from an earlier run's cache",
@@ -126,8 +132,8 @@ else:
           sum(r[1].get("model_calls", 0) for r in replies) == 8)
     check("shared calls return model verdicts to both requests",
           all(d["source"] == "llm" for r in replies for d in r[1].get("domains", [])) and len(replies) == 2)
-    check(f"model calls run concurrently but capped at 4 (8 x 1 s calls took {elapsed:.1f}s, expect ~2)",
-          1.5 <= elapsed <= 6)
+    check(f"model calls run concurrently but capped at 4 (8 x 1 s calls took {elapsed:.1f}s; 2 waves + lookups)",
+          1.5 <= elapsed <= 10)  # wide: each call also does real DNS and RDAP lookups
     check("GET /ready reports ok", get("/ready") == (200, {"status": "ok"}))
 
 bad = record("x.com")

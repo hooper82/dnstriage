@@ -95,4 +95,5 @@ This is a proof of concept. DNS logs are pushed to this service, while reports a
 * Alerting - Service doesn't have a threshold for how many bad-domains or any severity level for a query.
 * Context - There are good reasons for accessing BAD domains - this service only tracks, it makes no judgement as to if a node is compromised or not.
 * Live reputation - The blocklist and allowlist are static files, so they go out of date. A future version would ask a domain reputation API about each domain the local lists don't cover, keeping the local lists as overrides. Suitable APIs all need a key or sign-up, so this is left out to keep the service runnable with no configuration.
+* External lookups - Each unknown domain (never client IPs or full names) is looked up in DNS and in RDAP (rdap.org). That traffic leaves your network and can reach the domain owner's own nameservers. Failed lookups are passed to the model as "lookup failed", without retries.
 * Security - No authentication, authorisation or TLS. Any client that can reach the service can push logs and read reports. Run it on a trusted network, or put it behind a reverse proxy that handles TLS and authentication.
