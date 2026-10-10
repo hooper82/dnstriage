@@ -24,7 +24,8 @@ verdict**, leaving the judgement about a host to the analyst.
 **WARN** or **BAD** (curated lists first, an LLM only for unknowns), and returns each domain's
 verdict and evidence. The output is evidence for an analyst, not a judgement that a host is
 compromised and not a blocking decision. There are legitimate reasons to query a BAD domain.
-Per-client views were planned and cut for the line budget (§11).
+`GET /clients` lists each client's domains and verdicts, the most BAD/WARN first, so the analyst
+sees which hosts to look at.
 
 ## 2. Constraints
 
@@ -98,7 +99,7 @@ is nothing to report the model gets an explicit string instead: `"domain does no
 since rdap.org also returns 404 for TLDs it can't serve). Known limits: rdap.org rate-limits bursts,
 which then show up as `"lookup failed"`; and urllib's timeout applies per socket operation, so a
 redirect can take longer than 3 s. The evidence is cached with the verdict and shown by `/ingest`
-and `/domains`. The model is never given tools to fetch evidence itself (D3).
+and `/clients`. The model is never given tools to fetch evidence itself (D3).
 
 **LLM verdict.**
 - `AsyncOpenAI` client; `base_url`, `api_key` and `model` from env vars.
@@ -131,8 +132,8 @@ schema, validation, metrics) runs with no env vars and no GPU. A real model is t
 tier answered, not what it said. One test trigger: a request mentioning `smoke-invalid-output` gets
 a reply that breaks the schema, so the fail-cautious path is tested too.
 
-**Degraded mode.** If the model is unreachable, times out or errors, the verdict is `UNKNOWN` with source `degraded`. It is cached for 10 minutes, `/ready` reports `degraded`, `/health`
-stays OK, and a metric is incremented. The list tiers keep working.
+**Degraded mode.** If the model is unreachable, times out or errors, the verdict is `UNKNOWN` with source `degraded`. It is cached for 10 minutes, `/ready` reports `degraded` (it still answers
+200), and a metric is incremented. The list tiers keep working.
 
 - **No SDK retries** (`max_retries=0`), so `LLM_TIMEOUT_S` means what it says (the default 2 retries
   could triple it). Trade-off: a transient 429/503 from a real backend degrades that domain at once,
@@ -154,9 +155,8 @@ stays OK, and a metric is incremented. The list tiers keep working.
 | Method | Path | Purpose |
 |---|---|---|
 | `POST` | `/ingest` | Classify a batch of records; returns per-domain verdicts and a count of model calls. |
-| `GET` | `/domains/{domain}` | A domain's verdict: from the lists, else the cached model verdict with its evidence, else 404. The name is normalised. |
-| `GET` | `/health` | Liveness. |
-| `GET` | `/ready` | Readiness, including model status (`ok` / `degraded`). |
+| `GET` | `/clients` | Every client and the domains it queried, each with the latest verdict (and evidence) it was given. Clients with the most BAD, then the most WARN, domains come first. Order only, no score (D9). |
+| `GET` | `/ready` | Model status (`ok` / `degraded`); always 200, so it is also the liveness check. |
 | `GET` | `/metrics` | Prometheus metrics. |
 
 ```json
@@ -196,7 +196,7 @@ and 0 model calls when the same batch is posted again.
 | D6 | Fail cautious on bad output, visible on outage | Default to GOOD | A broken indicator that says "GOOD" is worse than none. An outage answers `UNKNOWN`, cached briefly (10 min) so a down model is left alone. |
 | D7 | In-memory state | A database | Line budget and simplicity. State (and metrics) is lost on restart and kept per process. A real deployment would add SQLite/Postgres adaptors. No migrations. |
 | D8 | Fake model by default | Require a live model to run | Anyone can run and test it with no env vars or GPU; a real model is added last and swapped in by config. |
-| D9 | No per-client risk level | A per-client compromise score | Querying a BAD domain can be legitimate; the analyst judges the host. Fewer thresholds, fewer lines. (Per-client views were later cut too; §11.) |
+| D9 | No per-client risk level | A per-client compromise score | Querying a BAD domain can be legitimate; the analyst judges the host. Fewer thresholds, fewer lines. The analyst sees the hosts in order of concern (`/clients`) and judges them. |
 | D10 | Active DNS and RDAP lookups for unknown domains *(user decision)* | Passive evidence from ingested records (subdomain count, NXDOMAIN ratio) | Simple, and gives the model real-world facts (records, domain age). Cost: unknown domains leave the network (C5), and resolving one queries the attacker's own nameservers. |
 
 ## 7. Threat model
@@ -209,7 +209,8 @@ and 0 model calls when the same batch is posted again.
 - **Resource exhaustion.** Batch size limit, model concurrency cap, and the registrable-domain cache
   bound what an attacker can cost. The cache bounds tunnelling (one key however many subdomains),
   not DGA: every new registrable domain costs a model call and a cache entry, and memory grows with
-  unique domains until restart (D7). The batch limit counts records, not
+  unique domains, and with clients × domains for `/clients`, until restart (D7); a client ID is at
+  most 64 characters. The batch limit counts records, not
   bytes: the whole body is parsed first, so a reverse proxy should cap request size.
 
 ### 7.1 Prompt injection via domain names
@@ -289,7 +290,7 @@ The service listens on 8080, because 8000 is vLLM's default and 8001 is the fake
 Runs on every pull request and push to `main`, without a real model: `ruff check`, build the image,
 then run `tests/smoke.py` twice:
 
-1. **With the fake model.** `/health` is OK, list tiers return their verdicts, and unknown domains
+1. **With the fake model.** `/ready` answers, list tiers return their verdicts, and unknown domains
    get a verdict from source `llm`.
 2. **With the model endpoint unreachable.** New unknown domains come back `degraded` and are then
    served as cached `UNKNOWN`, domains cached by the normal run are still served, and `/ready` says so. CI deliberately exercises the failure path: it stops the fake model and reruns
@@ -301,10 +302,14 @@ by CI.
 ## 11. Out of scope / future work
 
 - Persistent state: SQLite/Postgres adaptors for verdicts and client history.
-- **Cut for the 200-line budget** *(user decisions)*: per-client views (`GET /clients`,
-  `GET /clients/{ip}`: which domains each client queried, #13), and confidence from logprobs (the
-  model's probability for its chosen verdict where the backend returns logprobs, #15). Metrics (#14)
-  were kept over client views as the stronger operational signal, but trimmed to one counter: model
+- **Cut for the 200-line budget** *(user decisions)*: confidence from logprobs (the model's
+  probability for its chosen verdict where the backend returns logprobs, #15). Per-client views
+  (#13) were cut and then **restored**, because without them the service can't show which hosts
+  might be compromised; to pay for `GET /clients`, `GET /health` (`/ready` covers liveness) and
+  `GET /domains/{domain}` (its verdicts and evidence appear under each client) were removed.
+  `/clients` stores the latest verdict each client was given, so a `WARN` stays visible after its
+  domain leaves the cache; a degraded `UNKNOWN` stays until that client queries the domain again.
+  Metrics (#14) were trimmed to one counter: model
   latency (`dnstriage_llm_latency_seconds`), request outcomes (`dnstriage_llm_requests_total{outcome}`)
   and failed model calls (`dnstriage_degraded_total`) were cut. Note for adding latency: decorating
   the async `classify()` with `@Histogram.time()` records about 1 µs (it times creating the
