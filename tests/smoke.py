@@ -1,6 +1,6 @@
 """Smoke test: call the running service and check its responses.
 
-Usage: python tests/smoke.py [--model-down] [base_url]    (default http://localhost:8080)
+Usage: python3 tests/smoke.py [--model-down] [base_url]    (default http://localhost:8080; Windows: py)
 
 --model-down: the model endpoint has been stopped; expect degraded verdicts and /ready = degraded.
 Run it after a normal run against the same service: it expects that run's cached verdicts.

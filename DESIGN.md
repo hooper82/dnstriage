@@ -38,7 +38,7 @@ sees which hosts to look at.
 | C5 | No telemetry leaves the operator's network except to the configured model, and DNS/RDAP lookups of unknown domains *(user decision, D10)* | DNS logs are sensitive; the README recommends a self-hosted model. Client IPs and full names never leave; unknown registrable domains are looked up. |
 | C6 | The model never takes instructions from data | Domain names are attacker-controlled: delimited data, schema-constrained output, no tools. |
 | C7 | Failures are never silent | Degraded mode, readiness reporting, per-tier metrics. |
-| C8 | Easy to run, with no configuration | `docker compose up` plus `python tests/smoke.py`, with no env vars and no real model (a fake model ships in the repo). Works on Windows and Linux, locally or in Docker. |
+| C8 | Easy to run, with no configuration | `docker compose up` plus `python3 tests/smoke.py` (`py` on Windows), with no env vars and no real model (a fake model ships in the repo). Works on Windows and Linux, locally or in Docker. |
 | C9 | Simple over complete | It's a proof of concept. Readability beats features. |
 
 ## 3. Architecture

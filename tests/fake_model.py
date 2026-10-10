@@ -6,7 +6,7 @@ one mentioning smoke-slow is answered after 1 s.
 Test tooling, standard library only. Lets the LLM tier run with no real model, no GPU and no
 configuration. Its verdicts are meaningless.
 
-Usage: python tests/fake_model.py    (listens on port 8001)
+Usage: python3 tests/fake_model.py    (listens on port 8001; Windows: py)
 """
 import json
 import random
