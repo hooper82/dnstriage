@@ -1,5 +1,7 @@
 """Fake OpenAI-compatible model: answers every chat completion with a random verdict.
 
+A request mentioning smoke-invalid-output gets a reply that breaks the schema (an over-long reason).
+
 Test tooling, standard library only. Lets the LLM tier run with no real model, no GPU and no
 configuration. Its verdicts are meaningless.
 
@@ -13,7 +15,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 class FakeModel(BaseHTTPRequestHandler):
     def do_POST(self):
-        self.rfile.read(int(self.headers.get("Content-Length", 0)))  # read and ignore the request
+        request = self.rfile.read(int(self.headers.get("Content-Length", 0)))
         if self.path != "/v1/chat/completions":
             self.send_error(404)
             return
@@ -22,6 +24,8 @@ class FakeModel(BaseHTTPRequestHandler):
             "confidence": round(random.random(), 2),
             "reason": "Random verdict from the fake model.",
         }
+        if b"smoke-invalid-output" in request:  # test trigger: a reason over the 200-character limit
+            verdict["reason"] = "x" * 201
         body = json.dumps({
             "id": f"fake-{time.time_ns()}",
             "object": "chat.completion",

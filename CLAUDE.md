@@ -51,6 +51,7 @@ Setup and run (Linux / macOS):
 ```
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 .venv/bin/pip install -r requirements-dev.txt   # ruff, for the checks
+python3 tests/fake_model.py &   # fake model on 8001; the service's default endpoint
 .venv/bin/python -m uvicorn app.main:app --port 8080
 ```
 
@@ -59,6 +60,7 @@ Setup and run (Windows PowerShell; no activation needed, so execution policy doe
 ```
 py -3.12 -m venv .venv; .venv\Scripts\pip install -r requirements.txt
 .venv\Scripts\pip install -r requirements-dev.txt   # ruff, for the checks
+Start-Process py tests/fake_model.py   # fake model on 8001, own window
 .venv\Scripts\python -m uvicorn app.main:app --port 8080
 ```
 
