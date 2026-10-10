@@ -36,6 +36,14 @@ def post(path, payload):
         return err.code, json.load(err)
 
 
+def decisions(source):
+    """Current value of dnstriage_decisions_total for one source (0 before its first increment)."""
+    with urllib.request.urlopen(BASE + "/metrics", timeout=5) as resp:
+        text = resp.read().decode()
+    sample = f'dnstriage_decisions_total{{source="{source}"}} '
+    return next((float(line.removeprefix(sample)) for line in text.splitlines() if line.startswith(sample)), 0.0)
+
+
 def record(domain):
     return {"ts": "2026-10-07T06:00:00Z", "client": "10.0.0.12", "domain": domain, "qtype": "A", "rcode": "NOERROR"}
 
@@ -78,6 +86,9 @@ check("blocklisted registrable domain catches its subdomains (x.evil.github.io)"
 check("GET /domains normalises the name and answers from the lists (www.example.com)",
       get("/domains/www.example.com") == (200, {"domain": "example.com", "verdict": "GOOD", "source": "allowlist"}))
 check("GET /domains for a never-seen domain is 404", get(f"/domains/never{run}.com")[0] == 404)
+before = decisions("allowlist")
+post("/ingest", [record("example.com")])
+check("GET /metrics counts decisions by source (one more allowlist decision)", decisions("allowlist") == before + 1)
 if MODEL_DOWN:
     check("with the model down, new unlisted domains are UNKNOWN/degraded",
           all(verdicts.get(d) == ("UNKNOWN", "degraded") for d in [fresh_gh, fresh, invalid]))
@@ -87,7 +98,9 @@ if MODEL_DOWN:
           post("/ingest", [record(fresh)])[1].get("domains") == [{"domain": fresh, "verdict": "UNKNOWN", "source": "cache"}])
     check("a verdict cached by the earlier normal run is still served (localhost)",
           verdicts.get("localhost", ("", ""))[1] == "cache")
+    before = decisions("degraded")
     status, body = post("/ingest", [record(f"down{i}-{run}.com") for i in range(10)])
+    check("GET /metrics counts each degraded decision (10 for a 10-domain batch)", decisions("degraded") == before + 10)
     check("with the model down, a batch stops calling it after the first wave (1-4 calls for 10 domains)",
           1 <= body.get("model_calls", 0) <= 4 and all(d["source"] == "degraded" for d in body["domains"]))
     check("every domain in that batch is cached as UNKNOWN, skipped ones included",

@@ -171,10 +171,13 @@ Ingestion is synchronous: `/ingest` returns once the batch is classified.
 
 | Metric | Type | Labels |
 |---|---|---|
-| `dnstriage_decisions_total` | Counter | `source` = cache, allowlist, blocklist, llm, llm_invalid, degraded |
-| `dnstriage_llm_latency_seconds` | Histogram | — |
-| `dnstriage_llm_requests_total` | Counter | `outcome` = ok, invalid, timeout, error |
-| `dnstriage_degraded_total` | Counter | — |
+| `dnstriage_decisions_total` | Counter | `source` = blocklist, allowlist, cache, llm, llm_invalid, degraded |
+
+One metric, by user decision (line budget): it shows how decisions split across the tiers (how few
+reach the model) and, through `source="degraded"`, that the model is failing. It counts decisions,
+not model calls; the model-call count is in each `/ingest` response. Latency, request-outcome and
+degraded-call metrics were cut (§11). Counters are per process. `/metrics` redirects to `/metrics/`
+(Prometheus follows redirects).
 
 A `cache` decision always means a model call was avoided. A request that joins another's in-flight
 call also reports `llm` without making a call, so `llm` decisions can outnumber model requests.
@@ -190,7 +193,7 @@ The README will show a sample run, e.g. "10,000 queries → 400 unique domains �
 | D4 | Lists, then cache, before the model | Everything to the model | The model only sees genuinely unknown domains. |
 | D5 | Key on registrable domain (or the full name when it is itself blocklisted) | Key on full name | Tunnelling can't explode model calls or lookups; one listed host can't condemn its parent domain. |
 | D6 | Fail cautious on bad output, visible on outage | Default to GOOD | A broken indicator that says "GOOD" is worse than none. An outage answers `UNKNOWN`, cached briefly (10 min) so a down model is left alone. |
-| D7 | In-memory state | A database | Line budget and simplicity. State is lost on restart. A real deployment would add SQLite/Postgres adaptors. No migrations. |
+| D7 | In-memory state | A database | Line budget and simplicity. State (and metrics) is lost on restart and kept per process. A real deployment would add SQLite/Postgres adaptors. No migrations. |
 | D8 | Fake model by default | Require a live model to run | Anyone can run and test it with no env vars or GPU; a real model is added last and swapped in by config. |
 | D9 | No per-client risk level | A per-client compromise score | Querying a BAD domain can be legitimate; the analyst judges the host. Fewer thresholds, fewer lines. (Per-client views were later cut too; §11.) |
 | D10 | Active DNS and RDAP lookups for unknown domains *(user decision)* | Passive evidence from ingested records (subdomain count, NXDOMAIN ratio) | Simple, and gives the model real-world facts (records, domain age). Cost: unknown domains leave the network (C5), and resolving one queries the attacker's own nameservers. |
@@ -300,7 +303,11 @@ by CI.
 - **Cut for the 200-line budget** *(user decisions)*: per-client views (`GET /clients`,
   `GET /clients/{ip}`: which domains each client queried, #13), and confidence from logprobs (the
   model's probability for its chosen verdict where the backend returns logprobs, #15). Metrics (#14)
-  were kept over client views as the stronger operational signal.
+  were kept over client views as the stronger operational signal, but trimmed to one counter: model
+  latency (`dnstriage_llm_latency_seconds`), request outcomes (`dnstriage_llm_requests_total{outcome}`)
+  and failed model calls (`dnstriage_degraded_total`) were cut. Note for adding latency: decorating
+  the async `classify()` with `@Histogram.time()` records about 1 µs (it times creating the
+  coroutine); use `with LATENCY.time():` around the awaited call instead.
 - Live reputation lookups: query a domain reputation API for domains the local lists don't cover,
   with the lists kept as local overrides. Left out because every suitable API needs a key or
   sign-up, which would break running with no configuration (C8).
