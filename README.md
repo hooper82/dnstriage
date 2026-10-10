@@ -4,6 +4,52 @@ A small inference service that classifies DNS domains as GOOD, WARN, BAD or UNKN
 
 > **Status: proof of concept.** Runs with no configuration against a fake model (walkthrough below), and has been tested end to end against Claude Sonnet 5.5 (see *Using a real model*).
 
+**Size.** The service is **198 lines of Python**: all of it is `app/main.py`. `tests/` holds 227 more
+lines of test tooling, a smoke test and a fake model, which aren't part of the service. Counting
+every `.py` file in the repo gives 425.
+
+## How it works
+
+DNS query records are posted to `/ingest`. Each name is reduced to its registrable domain (or kept
+whole, if that exact host is blocklisted), and each unique domain goes through the tiers below until
+one gives a verdict:
+
+```
+POST /ingest  (up to 10,000 DNS query records)
+   │  normalise: lowercase, strip the trailing dot, group by registrable domain
+   ▼
+1. Blocklist ──── hit ──► BAD       local lists, checked first and authoritative
+2. Allowlist ──── hit ──► GOOD
+3. Cache ──────── hit ──► the model's earlier verdict (or UNKNOWN for 10 min after an outage)
+4. Enrichment ──────────► DNS A/NS/MX records + registration date (RDAP)
+5. Model ───────────────► GOOD / WARN / BAD, a confidence and a reason
+   │
+   ▼
+GET /clients   every client's domains and verdicts, most BAD then most WARN first
+```
+
+Where the model fits into the system:
+
+- **Only unknowns reach it.** Lists and the cache answer first; in the sample batch, 50 queries
+  make 14 model calls, and posting it again makes none.
+- **Evidence, not tools.** DNS and RDAP lookups happen in code and are passed to the model as data;
+  it can't fetch anything itself.
+- **Constrained, then checked.** One domain per call, sent as JSON inside a `<data>` block that the
+  system prompt says holds no instructions. The reply must match a schema (`LLMVerdict`), enforced
+  by the API's structured outputs and checked again by Pydantic; anything that doesn't match comes
+  back `WARN`, never a silent `GOOD`.
+- **Bounded cost.** By default at most 4 model calls in flight, concurrent requests for the same
+  domain share one call, and model verdicts are cached for 24 hours.
+- **Visible failure.** If the model is unreachable or times out, its domains come back
+  `UNKNOWN`/`degraded`, `/ready` says so, the rest of that batch stops calling the model, those
+  domains stay `UNKNOWN` for the next 10 minutes, and the lists keep working.
+- **Observable.** `/metrics` counts every decision by where it came from (blocklist, allowlist,
+  cache, model, invalid output, degraded).
+
+The model is Claude Sonnet 5.5, called through the Anthropic SDK; a fake model stands in by default
+so everything runs with no key. [DESIGN.md](DESIGN.md) has the reasoning behind each decision and
+the threat model.
+
 ## Quick start
 
 Needs Python 3.12+ (or just Docker). The service listens on http://localhost:8080.
