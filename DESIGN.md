@@ -10,7 +10,7 @@ that integrates an ML model into a system, in **under 200 lines of Python**, wit
 README.
 
 The aim is to show **ML integration and operational discipline**, not model research. The model is
-an external, swappable dependency behind an OpenAI-compatible API. The work goes into the system
+an external dependency behind one function (`classify()`), called through Anthropic's Messages API. The work goes into the system
 around it: tiered decisions, structured output, validation, caching, observability, failure handling
 and security.
 
@@ -33,9 +33,9 @@ sees which hosts to look at.
 |---|---|---|
 | C1 | Under 200 lines of Python in `app/` | One service module. Tests live in `tests/` and don't count. |
 | C2 | Public GitHub repository | Everything needed to run it is in the repo or public. |
-| C3 | Model only via an OpenAI-compatible API | Endpoint, key and model come from env vars. Works with vLLM, Ollama, llama.cpp or a hosted API. |
-| C4 | No proprietary or gated dependencies | A reviewer can run it with an open model. |
-| C5 | No telemetry leaves the operator's network except to the configured model, and DNS/RDAP lookups of unknown domains *(user decision, D10)* | DNS logs are sensitive; the README recommends a self-hosted model. Client IPs and full names never leave; unknown registrable domains are looked up. |
+| C3 | Model via Anthropic's Messages API *(user decision, D1)* | Endpoint, key and model come from env vars. Tested with Claude Sonnet 5.5; another provider means rewriting `classify()`. |
+| C4 | Runs with nothing proprietary by default | The fake model needs no key or account; real classification uses Claude (D1), which needs a Claude API key. |
+| C5 | Only unknown registrable domains, and their DNS/RDAP evidence, leave the operator's network *(user decisions, D1, D10)* | DNS logs are sensitive. Each unknown registrable domain is looked up (DNS, RDAP) and, with its evidence, sent to Anthropic. Client IPs and full names never leave. |
 | C6 | The model never takes instructions from data | Domain names are attacker-controlled: delimited data, schema-constrained output, no tools. |
 | C7 | Failures are never silent | Degraded mode, readiness reporting, per-tier metrics. |
 | C8 | Easy to run, with no configuration | `docker compose up` plus `python3 tests/smoke.py` (`py` on Windows), with no env vars and no real model (a fake model ships in the repo). Works on Windows and Linux, locally or in Docker. |
@@ -102,11 +102,19 @@ redirect can take longer than 3 s. The evidence is cached with the verdict and s
 and `/clients`. The model is never given tools to fetch evidence itself (D3).
 
 **LLM verdict.**
-- `AsyncOpenAI` client; `base_url`, `api_key` and `model` from env vars.
-- One Pydantic model is both the `response_format` JSON schema (strict, no extra fields) and the
-  validator, because not every backend enforces the schema. A `reason` over 200 characters fails
-  validation like any other broken output; it is not truncated.
-- Invalid output fails cautious: `WARN`, source `llm_invalid`.
+- The native Anthropic SDK (`AsyncAnthropic`); `base_url`, `api_key` and `model` from env vars. The
+  base URL is passed explicitly so the default stays the fake model (D8). Tested with
+  `claude-sonnet-5-5`, at `effort: "low"` (one domain per call needs little thinking).
+- One Pydantic model is both the schema and the check (D2): `client.messages.parse()` sends the
+  parts the API's structured outputs enforce (types, the enum, no extra fields) and validates the
+  rest client-side (the 0–1 confidence range and the 200-character `reason` cap, which the API
+  doesn't accept). A `reason` over 200 characters fails like any other broken output; it is not
+  truncated. Because the API only passes that cap on as a hint, Claude wrote right up to it and went
+  over on 2 of 6 calls in testing; the system prompt now asks for at most 150 characters, which
+  left 10 of 10 calls inside the 200 cap (126–187 characters).
+- Invalid output fails cautious: `WARN`, source `llm_invalid`. That covers a reply that breaks the
+  schema, a reply cut off mid-JSON, and a safety-classifier refusal (no answer to parse). Refusal
+  fallbacks to another model were left out *(user decision)*: a refusal already fails cautious.
 - A batch's unknown domains are classified concurrently; an `asyncio.Semaphore` caps model calls in
   flight (`LLM_MAX_CONCURRENCY`). Concurrent requests for the same domain share one call: the second
   waits on the first's task (behind `asyncio.shield`, so one cancelled request can't cancel a call
@@ -125,10 +133,10 @@ and `/clients`. The model is never given tools to fetch evidence itself (D3).
 planned and cut for the line budget (§11).
 
 **Fake model** (`tests/fake_model.py`, test tooling, not budgeted). A stdlib-only HTTP server that
-implements just `POST /v1/chat/completions` and answers every request with a random `GOOD`, `WARN`
+implements just `POST /v1/messages` (Anthropic's Messages API) and answers every request with a random `GOOD`, `WARN`
 or `BAD` in the verdict schema. The service's defaults point at it, so the whole pipeline (client,
-schema, validation, metrics) runs with no env vars and no GPU. A real model is two env vars away
-(`OPENAI_BASE_URL`, `MODEL_NAME`). Its verdicts are meaningless, so tests check only that the LLM
+schema, validation, metrics) runs with no env vars and no API key. Claude is three env vars away
+(`ANTHROPIC_BASE_URL`, `ANTHROPIC_API_KEY`, `MODEL_NAME`). Its verdicts are meaningless, so tests check only that the LLM
 tier answered, not what it said. One test trigger: a request mentioning `smoke-invalid-output` gets
 a reply that breaks the schema, so the fail-cautious path is tested too.
 
@@ -188,14 +196,14 @@ and 0 model calls when the same batch is posted again.
 
 | # | Decision | Rejected | Why |
 |---|---|---|---|
-| D1 | OpenAI-compatible API only | Vendor SDKs, proprietary APIs (e.g. Jev) | Portable; runs with an open model. |
-| D2 | Pydantic for schema and validation | `response_format` alone | Not all backends enforce schemas. |
+| D1 | Claude via the native Anthropic SDK *(user decision; reverses the original OpenAI-compatible-only choice)* | An OpenAI-compatible API (Anthropic's compatibility layer, vLLM, Ollama) | Schema enforcement end to end: Anthropic's OpenAI-compatibility layer ignores `response_format` and is documented as "not considered a long-term or production-ready solution". Cost: not portable by config alone; another provider means rewriting `classify()`. |
+| D2 | Pydantic for schema and validation | The API's structured outputs alone | The API can't enforce the confidence range or the `reason` length cap, so Pydantic still checks them (`messages.parse`); the fake model enforces nothing. |
 | D3 | Enrichment in code | Agentic tool calling | Tools widen the prompt-injection surface; backend support varies. |
 | D4 | Lists, then cache, before the model | Everything to the model | The model only sees genuinely unknown domains. |
 | D5 | Key on registrable domain (or the full name when it is itself blocklisted) | Key on full name | Tunnelling can't explode model calls or lookups; one listed host can't condemn its parent domain. |
 | D6 | Fail cautious on bad output, visible on outage | Default to GOOD | A broken indicator that says "GOOD" is worse than none. An outage answers `UNKNOWN`, cached briefly (10 min) so a down model is left alone. |
 | D7 | In-memory state | A database | Line budget and simplicity. State (and metrics) is lost on restart and kept per process. A real deployment would add SQLite/Postgres adaptors. No migrations. |
-| D8 | Fake model by default | Require a live model to run | Anyone can run and test it with no env vars or GPU; a real model is added last and swapped in by config. |
+| D8 | Fake model by default | Require a live model to run | Anyone can run and test it with no env vars or API key; Claude is swapped in by config. |
 | D9 | No per-client risk level | A per-client compromise score | Querying a BAD domain can be legitimate; the analyst judges the host. Fewer thresholds, fewer lines. The analyst sees the hosts in order of concern (`/clients`) and judges them. |
 | D10 | Active DNS and RDAP lookups for unknown domains *(user decision)* | Passive evidence from ingested records (subdomain count, NXDOMAIN ratio) | Simple, and gives the model real-world facts (records, domain age). Cost: unknown domains leave the network (C5), and resolving one queries the attacker's own nameservers. |
 
@@ -205,7 +213,8 @@ and 0 model calls when the same batch is posted again.
 - **No authentication or TLS.** Anyone who can reach the API can push records and read reports.
   Deploy on a trusted network or behind a reverse proxy that handles TLS and auth.
 - **Verdicts are advisory.** Nothing blocks traffic; a human analyst decides.
-- **Data sovereignty.** DNS logs reveal internal hosts and behaviour. Recommend a self-hosted model.
+- **Data sovereignty.** DNS logs reveal internal hosts and behaviour. With Claude, each unknown
+  registrable domain and its DNS/RDAP evidence goes to Anthropic (C5); client IPs and full names never do.
 - **Resource exhaustion.** Batch size limit, model concurrency cap, and the registrable-domain cache
   bound what an attacker can cost. The cache bounds tunnelling (one key however many subdomains),
   not DGA: every new registrable domain costs a model call and a cache entry, and memory grows with
@@ -239,7 +248,8 @@ model may decode.
   holds data, never instructions.
 - Output is schema-constrained to an enumerated verdict and validated (D2); the model has no tools
   (D3).
-- `reason` is length-capped and treated as untrusted text by anything that displays it.
+- `reason` is length-capped (checked client-side; the API can't enforce it) and treated as untrusted
+  text by anything that displays it.
 - The blocklist is checked before the model, so known-bad domains never reach it.
 - Verdicts are advisory: nothing is blocked or allowed automatically.
 
@@ -259,9 +269,9 @@ The sample batch includes an injection-style domain so the demo shows the case.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `OPENAI_BASE_URL` | `http://localhost:8001/v1` | Model endpoint. Defaults to the fake model. |
-| `OPENAI_API_KEY` | `not-needed` | Key, if required. |
-| `MODEL_NAME` | `random` | Model to use. The fake model ignores it. |
+| `ANTHROPIC_BASE_URL` | `http://localhost:8001` | Model endpoint. Defaults to the fake model; `https://api.anthropic.com` for Claude. |
+| `ANTHROPIC_API_KEY` | `not-needed` | Claude API key (from the Claude Console). |
+| `MODEL_NAME` | `random` | Model to use, e.g. `claude-sonnet-5-5`. The fake model ignores it. |
 | `ALLOWLIST_PATH` | `data/allowlist.txt` | One registrable domain per line (`www.example.com` would never match). |
 | `BLOCKLIST_PATH` | `data/blocklist.txt` | One domain per line, or hosts-file format; `#` starts a comment. |
 | `LLM_TIMEOUT_S` | `20` | Per-request timeout in seconds (applies to connecting and to reading the reply; not a total cap). |
@@ -274,16 +284,16 @@ The sample batch includes an injection-style domain so the demo shows the case.
 app/main.py            # the service (FastAPI + uvicorn, port 8080) — all budgeted Python
 data/                  # small sample allowlist, blocklist and sample_batch.json
 tests/smoke.py         # stdlib-only API checks (not budgeted)
-tests/fake_model.py    # stdlib-only fake OpenAI endpoint, random verdicts (not budgeted)
+tests/fake_model.py    # stdlib-only fake Anthropic Messages API, random verdicts (not budgeted)
 Dockerfile             # python:3.12-slim, non-root
-compose.yaml           # api + fake model (a real model service is added later)
+compose.yaml           # api + fake model (Claude is used from the venv, by env vars)
 .github/workflows/     # CI
 requirements.txt       # exact pins
 requirements-dev.txt   # dev tools (ruff), kept out of the image
 README.md, DESIGN.md, CLAUDE.md, .claude/
 ```
 
-The service listens on 8080, because 8000 is vLLM's default and 8001 is the fake model.
+The service listens on 8080; 8001 is the fake model.
 
 ## 10. CI (GitHub Actions)
 
@@ -303,7 +313,8 @@ by CI.
 
 - Persistent state: SQLite/Postgres adaptors for verdicts and client history.
 - **Cut for the 200-line budget** *(user decisions)*: confidence from logprobs (the model's
-  probability for its chosen verdict where the backend returns logprobs, #15). Per-client views
+  probability for its chosen verdict where the backend returns logprobs, #15; the Anthropic API
+  doesn't return logprobs, so this would now need a different backend). Per-client views
   (#13) were cut and then **restored**, because without them the service can't show which hosts
   might be compromised; to pay for `GET /clients`, `GET /health` (`/ready` covers liveness) and
   `GET /domains/{domain}` (its verdicts and evidence appear under each client) were removed.

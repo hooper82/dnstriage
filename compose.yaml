@@ -4,11 +4,11 @@ services:
     ports:
       - "8080:8080"
     environment:
-      OPENAI_BASE_URL: http://fake-model:8001/v1
+      ANTHROPIC_BASE_URL: http://fake-model:8001
     depends_on:
       - fake-model
 
-  # Stand-in for a real model: random verdicts over the OpenAI API (tests/fake_model.py).
+  # Stand-in for Claude: random verdicts over the Anthropic Messages API (tests/fake_model.py).
   fake-model:
     image: python:3.12-slim
     command: python /tests/fake_model.py
