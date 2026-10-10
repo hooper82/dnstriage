@@ -25,6 +25,11 @@ jobs:
       - name: Smoke test
         run: python tests/smoke.py
 
+      - name: Smoke test with the model down
+        run: |
+          docker compose stop fake-model
+          python tests/smoke.py --model-down
+
       - name: Service logs
         if: failure()
         run: docker compose logs

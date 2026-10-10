@@ -42,11 +42,15 @@ Unknown domains are classified by a model. Until you point it at a real one, a *
 python tests/smoke.py
 ```
 
+To see degraded mode, stop the fake model and run `python tests/smoke.py --model-down`: unknown
+domains come back `UNKNOWN`/`degraded`, the lists keep working, and `/ready` reports `degraded`.
+
 ## API
 
 | Method | Path | Purpose |
 |---|---|---|
 | `GET` | `/health` | Liveness. |
+| `GET` | `/ready` | Model status: `ok`, or `degraded` if the last model call failed. Always HTTP 200. |
 | `POST` | `/ingest` | Classify a batch (JSON array, up to 10,000) of DNS query records; returns one verdict per registrable domain. |
 
 A record looks like this:
@@ -68,6 +72,7 @@ All settings are optional environment variables; the defaults run the demo as-is
 | `OPENAI_BASE_URL` | `http://localhost:8001/v1` | OpenAI-compatible model endpoint. The default is the fake model. |
 | `OPENAI_API_KEY` | `not-needed` | Key for the endpoint, if it needs one. |
 | `MODEL_NAME` | `random` | Model to use (the fake model ignores it). |
+| `LLM_TIMEOUT_S` | `20` | Seconds to wait for the model before marking a domain `degraded`. |
 
 The bundled lists are tiny samples with fake or reserved names. Lists are read at startup.
 
