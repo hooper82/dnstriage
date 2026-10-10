@@ -16,7 +16,8 @@ The design lives in `DESIGN.md`. Keep it true: if a change alters a decision rec
   and merges every PR.
 - **Simplicity beats everything.** Readability and correctness first, then features.
 - **200-line budget.** All Python under `app/` must total under 200 lines. `tests/` and `.claude/` do not count. Check with:
-  `python -c "import pathlib; print(sum(len(p.read_text().splitlines()) for p in pathlib.Path('app').rglob('*.py')))"`
+  `python3 -c "import pathlib; print(sum(len(p.read_text().splitlines()) for p in pathlib.Path('app').rglob('*.py')))"`
+  (Windows: `py` instead of `python3`)
 - **In-memory state only.** No database, no migrations. The README notes that a real deployment would need SQLite/Postgres adaptors.
 - **Runs on Windows and Linux, locally and in Docker.** No bash-only steps in the run or test path.
   Use `pathlib`, not hard-coded separators.
@@ -65,7 +66,7 @@ Start-Process py tests/fake_model.py   # fake model on 8001, own window
 ```
 
 Checks: `ruff check .` (CI runs it too), the line-budget command above,
-`python tests/smoke.py` against a running service (and `--model-down` with the fake model stopped), and `docker build .` when the Dockerfile or
+`python3 tests/smoke.py` (Windows: `py`) against a running service (and `--model-down` with the fake model stopped), and `docker build .` when the Dockerfile or
 dependencies change.
 
 Tests are deliberately minimal: `tests/smoke.py` uses only the standard library (`urllib`) to call

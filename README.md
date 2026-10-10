@@ -38,10 +38,10 @@ Unknown domains are classified by a model. Until you point it at a real one, a *
 **Check it works.** In a second terminal, run the smoke test (standard library only, so any Python 3 will do):
 
 ```bash
-python tests/smoke.py
+python3 tests/smoke.py      # Windows: py tests/smoke.py
 ```
 
-To see degraded mode, stop the fake model and run `python tests/smoke.py --model-down`: new unknown
+To see degraded mode, stop the fake model and run `python3 tests/smoke.py --model-down` (Windows: `py`): new unknown
 domains come back `UNKNOWN`/`degraded` (and stay `UNKNOWN` for 10 minutes, so a down model is left alone), domains the model already classified
 are still served from the cache, the lists keep working, and `/ready` reports `degraded`.
 
