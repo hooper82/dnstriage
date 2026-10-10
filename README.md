@@ -3,7 +3,7 @@
 A small inference service that classifies DNS domains as GOOD, WARN, BAD or UNKNOWN, using curated lists first and falling back to an LLM for unknown domains.
 
 > **Status: work in progress.**
-> Configuration and a sample run will appear here as features land.
+> A sample run will appear here as features land.
 
 ## Quick start
 
@@ -52,6 +52,17 @@ A record looks like this:
 
 Interactive docs are at http://localhost:8080/docs.
 
+## Configuration
+
+All settings are optional environment variables; the defaults run the demo as-is.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `BLOCKLIST_PATH` | `data/blocklist.txt` | Known-bad domains (`BAD`). One per line or hosts-file format, e.g. the abuse.ch URLhaus hostfile. |
+| `ALLOWLIST_PATH` | `data/allowlist.txt` | Known-good registrable domains (`GOOD`), e.g. the Tranco top 100k. |
+
+The bundled lists are tiny samples with fake or reserved names. Lists are read at startup.
+
 ## Documents
 
 - [DESIGN.md](DESIGN.md): purpose, architecture, decisions and threat model.
@@ -66,4 +77,5 @@ This is a proof of concept. DNS logs are pushed to this service, while reports a
 * Retention - Currently uses an in-memory data store, so state is lost on restart. This would need to move to a permanent DB such as SQLite or Postgres.
 * Alerting - Service doesn't have a threshold for how many bad-domains or any severity level for a query.
 * Context - There are good reasons for accessing BAD domains - this service only tracks, it makes no judgement as to if a node is compromised or not.
+* Live reputation - The blocklist and allowlist are static files, so they go out of date. A future version would ask a domain reputation API about each domain the local lists don't cover, keeping the local lists as overrides. Suitable APIs all need a key or sign-up, so this is left out to keep the service runnable with no configuration.
 * Security - No authentication, authorisation or TLS. Any client that can reach the service can push logs and read reports. Run it on a trusted network, or put it behind a reverse proxy that handles TLS and authentication.

@@ -1,4 +1,6 @@
+import os
 from datetime import datetime
+from pathlib import Path
 from typing import Annotated
 
 import tldextract
@@ -13,6 +15,16 @@ app = FastAPI(title="dnstriage")
 extract = tldextract.TLDExtract(suffix_list_urls=(), cache_dir=None, include_psl_private_domains=True)
 
 
+def load(path: str) -> set[str]:
+    """One name per line, or hosts-file format ("0.0.0.0 bad.example.com"). # starts a comment."""
+    lines = Path(path).read_text(encoding="utf-8-sig").splitlines()
+    return {word.lower().rstrip(".") for line in lines for word in line.partition("#")[0].split()[-1:]}
+
+
+BLOCKLIST = load(os.environ.get("BLOCKLIST_PATH", "data/blocklist.txt"))
+ALLOWLIST = load(os.environ.get("ALLOWLIST_PATH", "data/allowlist.txt"))
+
+
 class Record(BaseModel):
     ts: datetime
     client: str
@@ -21,9 +33,20 @@ class Record(BaseModel):
     rcode: str
 
 
-def registrable(domain: str) -> str:
+def key(domain: str) -> str:
+    """The registrable domain, or the full name if that exact host is blocklisted."""
     name = domain.lower().rstrip(".")
+    if name in BLOCKLIST:
+        return name
     return extract(name).top_domain_under_public_suffix or name
+
+
+def verdict(domain: str) -> dict:
+    if domain in BLOCKLIST:
+        return {"domain": domain, "verdict": "BAD", "source": "blocklist"}
+    if domain in ALLOWLIST:
+        return {"domain": domain, "verdict": "GOOD", "source": "allowlist"}
+    return {"domain": domain, "verdict": "UNKNOWN", "source": "degraded"}
 
 
 @app.get("/health")
@@ -33,5 +56,5 @@ def health() -> dict:
 
 @app.post("/ingest")
 async def ingest(records: Annotated[list[Record], Field(max_length=MAX_BATCH)]) -> dict:
-    domains = dict.fromkeys(registrable(r.domain) for r in records)
-    return {"domains": [{"domain": d, "verdict": "UNKNOWN", "source": "degraded"} for d in domains]}
+    keys = dict.fromkeys(key(r.domain) for r in records)
+    return {"domains": [verdict(k) for k in keys]}

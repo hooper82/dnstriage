@@ -46,7 +46,7 @@ POST /ingest (batch of DNS query records)
    │
    ▼
 Normalise ─── lowercase, strip trailing dot, split into registrable domain + subdomain labels
-   │  (once per unique registrable domain)
+   │  (once per unique key: registrable domain, or the full name if blocklisted)
    ▼
 1. Verdict cache ──── hit ──► cached verdict
 2. Blocklist ──────── hit ──► BAD
@@ -61,8 +61,9 @@ behind an allowlisted parent.
 
 **Cache key: registrable domain.** A DNS tunnel produces thousands of unique subdomains under one
 domain. Keying on the registrable domain means one model call, and the model sees the *pattern*
-(subdomain count and sample labels) rather than one name. Verdicts expire after a TTL. Degraded
-results are never cached.
+(subdomain count and sample labels) rather than one name. The one exception: a name that is itself
+on the blocklist is its own key (see Lists). Verdicts expire after a TTL. Degraded results are
+never cached.
 
 **Lists.** Both load at startup from paths in env vars.
 
@@ -71,7 +72,16 @@ results are never cached.
 | Blocklist | abuse.ch URLhaus | Full name or registrable domain | `BAD` |
 | Allowlist | Tranco top 100k | Registrable domain | `GOOD` |
 
-The blocklist is checked first, so a known-bad host under a popular domain is never waved through.
+The blocklist is checked first, so a listed host under a popular domain is never waved through.
+
+**A compromised host doesn't condemn its domain** *(user decision)*. A name that is itself on the
+blocklist gets its own entry and verdict. Everything else still groups by registrable domain. So if
+`bad.example.com` is listed, that host is `BAD` while the rest of `example.com` keeps its own verdict.
+One compromised record never condemns, or caches, a whole legitimate domain. Accepted limit: only
+exact names match, so `x.bad.example.com` is grouped under `example.com` and isn't caught by a
+`bad.example.com` entry (feeds list exact hosts).
+
+Lists are read once at startup; a missing file stops the service rather than running without it.
 
 **Enrichment.** Deterministic, in code, before the model is called: whether the domain resolves, its
 NS/MX records (`dnspython`, short timeout), unique-subdomain count with up to five sample labels,
@@ -143,7 +153,7 @@ The README will show a sample run, e.g. "10,000 queries → 400 unique domains �
 | D2 | Pydantic for schema and validation | `response_format` alone | Not all backends enforce schemas. |
 | D3 | Enrichment in code | Agentic tool calling | Tools widen the prompt-injection surface; backend support varies. |
 | D4 | Lists and cache before the model | Everything to the model | The model only sees genuinely unknown domains. |
-| D5 | Key on registrable domain | Key on full name | Tunnelling can't explode model calls; the model judges the pattern. |
+| D5 | Key on registrable domain (or the full name when it is itself blocklisted) | Key on full name | Tunnelling can't explode model calls; the model judges the pattern; one listed host can't condemn its parent domain. |
 | D6 | Fail cautious on bad output, visible on outage | Default to GOOD | A broken indicator that says "GOOD" is worse than none. |
 | D7 | In-memory state | A database | Line budget and simplicity. State is lost on restart. A real deployment would add SQLite/Postgres adaptors. No migrations. |
 | D8 | Fake model by default | Require a live model to run | Anyone can run and test it with no env vars or GPU; a real model is added last and swapped in by config. |
@@ -207,8 +217,8 @@ The sample batch includes an injection-style domain so the demo shows the case.
 | `OPENAI_BASE_URL` | `http://localhost:8001/v1` | Model endpoint. Defaults to the fake model. |
 | `OPENAI_API_KEY` | `not-needed` | Key, if required. |
 | `MODEL_NAME` | `random` | Model to use. The fake model ignores it. |
-| `ALLOWLIST_PATH` | `data/allowlist.txt` | One domain per line. |
-| `BLOCKLIST_PATH` | `data/blocklist.txt` | One domain per line, or hosts-file format. |
+| `ALLOWLIST_PATH` | `data/allowlist.txt` | One registrable domain per line (`www.example.com` would never match). |
+| `BLOCKLIST_PATH` | `data/blocklist.txt` | One domain per line, or hosts-file format; `#` starts a comment. |
 | `LLM_TIMEOUT_S` | `20` | Per-call timeout. |
 | `LLM_MAX_CONCURRENCY` | `4` | Concurrent model calls. |
 | `CACHE_TTL_S` | `86400` | Verdict cache lifetime. |
@@ -246,6 +256,9 @@ by CI.
 ## 11. Out of scope / future work
 
 - Persistent state: SQLite/Postgres adaptors for verdicts and client history.
+- Live reputation lookups: query a domain reputation API for domains the local lists don't cover,
+  with the lists kept as local overrides. Left out because every suitable API needs a key or
+  sign-up, which would break running with no configuration (C8).
 - Queue-based ingestion (Redis Streams, Kafka) for high volume.
 - Agentic enrichment (WHOIS, reputation) through scoped, read-only tools.
 - Log tailers for Pi-hole/dnsmasq and Zeek `dns.log`.

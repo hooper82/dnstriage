@@ -48,13 +48,19 @@ else:
 
 check("GET /health returns 200 and status ok", status == 200 and body == {"status": "ok"})
 
-status, body = post("/ingest", [record(d) for d in ["a.example.com", "B.Example.COM.", "evil.github.io", "localhost"]])
-verdicts = {d["domain"]: d for d in body.get("domains", [])}
+names = ["a.example.com", "B.Example.COM.", "bad.example.com", "x.evil.github.io", "someone.github.io", "localhost"]
+status, body = post("/ingest", [record(d) for d in names])
+verdicts = {d["domain"]: (d["verdict"], d["source"]) for d in body.get("domains", [])}
 check("POST /ingest returns 200", status == 200)
-check("ingest groups names by registrable domain", list(verdicts) == ["example.com", "evil.github.io", "localhost"])
-check("ingest keeps private suffixes separate (evil.github.io)", "evil.github.io" in verdicts)
-check("ingest marks unclassified domains UNKNOWN/degraded",
-      all(d["verdict"] == "UNKNOWN" and d["source"] == "degraded" for d in verdicts.values()))
+check("ingest groups names by registrable domain, blocklisted hosts separately",
+      list(verdicts) == ["example.com", "bad.example.com", "evil.github.io", "someone.github.io", "localhost"])
+check("allowlisted domain is GOOD (example.com)", verdicts.get("example.com") == ("GOOD", "allowlist"))
+check("blocklisted host under an allowlisted domain is BAD (bad.example.com)",
+      verdicts.get("bad.example.com") == ("BAD", "blocklist"))
+check("blocklisted registrable domain catches its subdomains (x.evil.github.io)",
+      verdicts.get("evil.github.io") == ("BAD", "blocklist"))
+check("allowlisting github.io doesn't cover other *.github.io sites", verdicts.get("someone.github.io") == ("UNKNOWN", "degraded"))
+check("unlisted domain is UNKNOWN/degraded (localhost)", verdicts.get("localhost") == ("UNKNOWN", "degraded"))
 
 bad = record("x.com")
 del bad["domain"]
