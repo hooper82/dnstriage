@@ -27,7 +27,8 @@ GET /clients   every client's domains and verdicts, most BAD then most WARN firs
 
 Where the model fits into the system:
 
-- **Only unknowns reach it.** Lists and the cache answer first.
+- **Only unknowns reach it.** Lists and the cache answer first. A DGA burst is the exception: every
+  new name is a model call.
 - **Evidence, not tools.** DNS and RDAP lookups happen in code and are passed to the model as data.
 - **Constrained, then checked.** One domain per call, sent as JSON inside a `<data>` block that the
   system prompt says holds no instructions. The reply must match a schema (`LLMVerdict`), enforced
@@ -87,7 +88,9 @@ are still served from the cache, the lists keep working, and `/ready` reports `d
 ### Test Data
 
 `data/sample_batch.json` is 50 DNS query records from three clients: list hits, DGA-style names, a
-tunnel, a beacon and two prompt-injection attempts. Start the service fresh (state is in memory, so
+tunnel, a beacon and two prompt-injection attempts. It uses only reserved names (`.test`,
+`example.net`, `example.org`), so its real DNS and RDAP lookups never reach a real domain owner.
+Start the service fresh (state is in memory, so
 an earlier smoke run would already have cached these), then post the batch. The same commands work
 against `docker compose up`. On Windows, use `curl.exe` instead of `curl`, `py` instead of `python3`, and
 `findstr` instead of `grep`.
@@ -114,10 +117,6 @@ injection aims for. The mitigations ([DESIGN.md §7.1](DESIGN.md#71-prompt-injec
 reduce the risk but **do not remove it**: a real model can still
 be talked into `GOOD` by a domain name or by the attacker's own NS/MX records, and that `GOOD` is then
 cached for the TTL.
-
-Posting the batch makes real DNS and RDAP lookups for the unknown names: they go to your resolver,
-IANA's servers for the example domains, and rdap.org. The sample uses reserved names only (`.test`,
-`example.net`, `example.org`), so no real domain owner, and no attacker, ever sees those lookups.
 
 
 ## Using a real model
