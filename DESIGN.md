@@ -175,6 +175,9 @@ The `/ingest` body is a JSON array of up to 10,000 records; a larger batch, or a
 is rejected with 422. `domain` must be a DNS name (labels of letters, digits, `_` and `-`).
 Ingestion is synchronous: `/ingest` returns once the batch is classified.
 
+`/clients` keeps the latest verdict each client was given, so a `WARN` stays visible after its
+domain leaves the cache; a degraded `UNKNOWN` stays until that client queries the domain again.
+
 ## 5. Observability
 
 | Metric | Type | Labels |
@@ -184,7 +187,7 @@ Ingestion is synchronous: `/ingest` returns once the batch is classified.
 One metric, by user decision (line budget): it shows how decisions split across the tiers (how few
 reach the model) and, through `source="degraded"`, that the model is failing. It counts decisions,
 not model calls; the model-call count is in each `/ingest` response. Latency, request-outcome and
-degraded-call metrics were cut (§11). Counters are per process. `/metrics` redirects to `/metrics/`
+degraded-call metrics are future work (§11). Counters are per process. `/metrics` redirects to `/metrics/`
 (Prometheus follows redirects).
 
 A `cache` decision always means a model call was avoided. A request that joins another's in-flight
@@ -312,22 +315,14 @@ by CI.
 ## 11. Out of scope / future work
 
 - Persistent state: SQLite/Postgres adaptors for verdicts and client history.
-- **Cut for the 200-line budget** *(user decisions)*: confidence from logprobs (the model's
-  probability for its chosen verdict where the backend returns logprobs, #15; the Anthropic API
-  doesn't return logprobs, so this would now need a different backend). Per-client views
-  (#13) were cut and then **restored**, because without them the service can't show which hosts
-  might be compromised; to pay for `GET /clients`, `GET /health` (`/ready` covers liveness) and
-  `GET /domains/{domain}` (its verdicts and evidence appear under each client) were removed.
-  `/clients` stores the latest verdict each client was given, so a `WARN` stays visible after its
-  domain leaves the cache; a degraded `UNKNOWN` stays until that client queries the domain again.
-  Metrics (#14) were trimmed to one counter: model
-  latency (`dnstriage_llm_latency_seconds`), request outcomes (`dnstriage_llm_requests_total{outcome}`)
-  and failed model calls (`dnstriage_degraded_total`) were cut. Note for adding latency: decorating
-  the async `classify()` with `@Histogram.time()` records about 1 µs (it times creating the
-  coroutine); use `with LATENCY.time():` around the awaited call instead.
 - Live reputation lookups: query a domain reputation API for domains the local lists don't cover,
   with the lists kept as local overrides. Left out because every suitable API needs a key or
   sign-up, which would break running with no configuration (C8).
+- More metrics: model latency, model request outcomes and failed model calls. To time the model,
+  wrap the awaited call in `with LATENCY.time():`; decorating the async `classify()` with
+  `@Histogram.time()` records about 1 µs (it times creating the coroutine).
+- Confidence from logprobs: the model's probability for its chosen verdict, rather than the
+  confidence it states. The Anthropic API doesn't return logprobs, so this needs another backend.
 - Queue-based ingestion (Redis Streams, Kafka) for high volume.
 - Agentic enrichment (reputation) through scoped, read-only tools.
 - Log tailers for Pi-hole/dnsmasq and Zeek `dns.log`.
