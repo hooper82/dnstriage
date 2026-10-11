@@ -33,9 +33,9 @@ sees which hosts to look at.
 |---|---|---|
 | C1 | Under 200 lines of Python in `app/` | One service module. Tests live in `tests/` and don't count. |
 | C2 | Public GitHub repository | Everything needed to run it is in the repo or public. |
-| C3 | Model via Anthropic's Messages API *(user decision, D1)* | Endpoint, key and model come from env vars. Tested with Claude Sonnet 5.5; another provider means rewriting `classify()`. |
+| C3 | Model via Anthropic's Messages API (D1) | Endpoint, key and model come from env vars. Tested with Claude Sonnet 5.5; another provider means rewriting `classify()`. |
 | C4 | Runs with nothing proprietary by default | The fake model needs no key or account; real classification uses Claude (D1), which needs a Claude API key. |
-| C5 | Only unknown registrable domains, and their DNS/RDAP evidence, leave the operator's network *(user decisions, D1, D10)* | DNS logs are sensitive. Each unknown registrable domain is looked up (DNS, RDAP) and, with its evidence, sent to Anthropic. Client IPs and full names never leave. |
+| C5 | Only unknown registrable domains, and their DNS/RDAP evidence, leave the operator's network (D1, D10) | DNS logs are sensitive. Each unknown registrable domain is looked up (DNS, RDAP) and, with its evidence, sent to Anthropic. Client IPs and full names never leave. |
 | C6 | The model never takes instructions from data | Domain names are attacker-controlled: delimited data, schema-constrained output, no tools. |
 | C7 | Failures are never silent | Degraded mode, readiness reporting, per-tier metrics. |
 | C8 | Easy to run, with no configuration | `docker compose up` plus `python3 tests/smoke.py` (`py` on Windows), with no env vars and no real model (a fake model ships in the repo). Works on Windows and Linux, locally or in Docker. |
@@ -80,7 +80,7 @@ from the cache.
 
 The blocklist is checked first, so a listed host under a popular domain is never waved through.
 
-**A compromised host doesn't condemn its domain** *(user decision)*. A name that is itself on the
+**A compromised host doesn't condemn its domain**. A name that is itself on the
 blocklist gets its own entry and verdict. Everything else still groups by registrable domain. So if
 `bad.example.com` is listed, that host is `BAD` while the rest of `example.com` keeps its own verdict.
 One compromised record never condemns, or caches, a whole legitimate domain. Accepted limit: only
@@ -89,7 +89,7 @@ exact names match, so `x.bad.example.com` is grouped under `example.com` and isn
 
 Lists are read once at startup; a missing file stops the service rather than running without it.
 
-**Enrichment** *(user decision: keep it simple)*. Deterministic, in code, before the model is called,
+**Enrichment**. Deterministic, in code, before the model is called,
 for every unknown domain that reaches the model: its A, NS and MX records (`dnspython`, 3 s, at most
 5 per type) and its registration date from RDAP, WHOIS's structured successor (`https://rdap.org`,
 stdlib `urllib`, 3 s). The four lookups run in parallel, inside the model concurrency cap, so a big
@@ -114,13 +114,13 @@ and `/clients`. The model is never given tools to fetch evidence itself (D3).
   left 10 of 10 calls inside the 200 cap (126–187 characters).
 - Invalid output fails cautious: `WARN`, source `llm_invalid`. That covers a reply that breaks the
   schema, a reply cut off mid-JSON, and a safety-classifier refusal (no answer to parse). Refusal
-  fallbacks to another model were left out *(user decision)*: a refusal already fails cautious.
+  fallbacks to another model were left out: a refusal already fails cautious.
 - A batch's unknown domains are classified concurrently; an `asyncio.Semaphore` caps model calls in
   flight (`LLM_MAX_CONCURRENCY`). Concurrent requests for the same domain share one call: the second
   waits on the first's task (behind `asyncio.shield`, so one cancelled request can't cancel a call
   others are waiting on). A shared call runs under the batch that started it.
 - Timeouts and errors trigger degraded mode for that domain, and **the rest of that batch skips the
-  model** *(user decision)*: a model outage costs one wave of failed calls per batch (at most
+  model**: a model outage costs one wave of failed calls per batch (at most
   `LLM_MAX_CONCURRENCY`), not one per unknown domain. Per batch, not global: a global flag would stop
   every call, so `/ready` could never see a success and recover. Skipped domains are cached as
   `UNKNOWN` like failed ones (see below), so repeat traffic leaves the model alone for 10 minutes.
@@ -146,7 +146,7 @@ a reply that breaks the schema, so the fail-cautious path is tested too.
 - **No SDK retries** (`max_retries=0`), so `LLM_TIMEOUT_S` means what it says (the default 2 retries
   could triple it). Trade-off: a transient 429/503 from a real backend degrades that domain at once,
   and, through the batch skip and the degraded cache, the rest of that batch, for 10 minutes.
-- **The degraded cache is an outage timeout** *(user decision)*. Every unknown domain in a batch
+- **The degraded cache is an outage timeout**. Every unknown domain in a batch
   that found the model down, called or skipped, is cached as `UNKNOWN` for a fixed 10 minutes
   (`DEGRADED_TTL`, not configurable). Repeat traffic doesn't touch a down model during that window;
   after it, traffic tries the model again. Cost: after the model recovers, those domains stay
@@ -184,7 +184,7 @@ domain leaves the cache; a degraded `UNKNOWN` stays until that client queries th
 |---|---|---|
 | `dnstriage_decisions_total` | Counter | `source` = blocklist, allowlist, cache, llm, llm_invalid, degraded |
 
-One metric, by user decision (line budget): it shows how decisions split across the tiers (how few
+One metric, to stay within the line budget: it shows how decisions split across the tiers (how few
 reach the model) and, through `source="degraded"`, that the model is failing. It counts decisions,
 not model calls; the model-call count is in each `/ingest` response. Latency, request-outcome and
 degraded-call metrics are future work (§11). Counters are per process. `/metrics` redirects to `/metrics/`
@@ -199,7 +199,7 @@ and 0 model calls when the same batch is posted again.
 
 | # | Decision | Rejected | Why |
 |---|---|---|---|
-| D1 | Claude via the native Anthropic SDK *(user decision; reverses the original OpenAI-compatible-only choice)* | An OpenAI-compatible API (Anthropic's compatibility layer, vLLM, Ollama) | Schema enforcement end to end: Anthropic's OpenAI-compatibility layer ignores `response_format` and is documented as "not considered a long-term or production-ready solution". Cost: not portable by config alone; another provider means rewriting `classify()`. |
+| D1 | Claude via the native Anthropic SDK | An OpenAI-compatible API (Anthropic's compatibility layer, vLLM, Ollama) | Schema enforcement end to end: Anthropic's OpenAI-compatibility layer ignores `response_format` and is documented as "not considered a long-term or production-ready solution". Cost: not portable by config alone; another provider means rewriting `classify()`. |
 | D2 | Pydantic for schema and validation | The API's structured outputs alone | The API can't enforce the confidence range or the `reason` length cap, so Pydantic still checks them (`messages.parse`); the fake model enforces nothing. |
 | D3 | Enrichment in code | Agentic tool calling | Tools widen the prompt-injection surface; backend support varies. |
 | D4 | Lists, then cache, before the model | Everything to the model | The model only sees genuinely unknown domains. |
@@ -208,7 +208,7 @@ and 0 model calls when the same batch is posted again.
 | D7 | In-memory state | A database | Line budget and simplicity. State (and metrics) is lost on restart and kept per process. A real deployment would add SQLite/Postgres adaptors. No migrations. |
 | D8 | Fake model by default | Require a live model to run | Anyone can run and test it with no env vars or API key; Claude is swapped in by config. |
 | D9 | No per-client risk level | A per-client compromise score | Querying a BAD domain can be legitimate; the analyst judges the host. Fewer thresholds, fewer lines. The analyst sees the hosts in order of concern (`/clients`) and judges them. |
-| D10 | Active DNS and RDAP lookups for unknown domains *(user decision)* | Passive evidence from ingested records (subdomain count, NXDOMAIN ratio) | Simple, and gives the model real-world facts (records, domain age). Cost: unknown domains leave the network (C5), and resolving one queries the attacker's own nameservers. |
+| D10 | Active DNS and RDAP lookups for unknown domains | Passive evidence from ingested records (subdomain count, NXDOMAIN ratio) | Simple, and gives the model real-world facts (records, domain age). Cost: unknown domains leave the network (C5), and resolving one queries the attacker's own nameservers. |
 
 ## 7. Threat model
 
